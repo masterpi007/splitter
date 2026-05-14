@@ -1,7 +1,8 @@
 import type { AuthEnv } from '../../types/auth';
 import { requireGroup, requireGroupAdmin } from '../../utils/session';
-import { softRemoveMember, findMember, saveGroup } from '../../utils/groups';
+import { softRemoveMember, findMember, saveGroup, getExpenses } from '../../utils/groups';
 import { removeMembership } from '../../utils/users';
+import { calculateBalances, isBalanceClear } from '../../utils/balances';
 
 // PATCH /api/groups/members/:id — admin edits per-member settings.
 // Currently only share (the "Split" weight). Passing null/undefined or 0
@@ -59,6 +60,7 @@ export const onRequestPatch: PagesFunction<AuthEnv> = async (context) => {
 // Admins can remove anyone; any member can remove themselves (leave the group).
 // Soft-remove: entry moves to removedMembers so existing expenses still resolve
 // names. Cannot remove the last admin.
+// Blocked if the member has any outstanding or pending balance.
 export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
   try {
     const ctx = await requireGroup(context.env, context.request);
@@ -84,6 +86,20 @@ export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
     if (wasAdmin && group.admins.length <= 1) {
       return Response.json(
         { success: false, error: 'Cannot remove the last admin — promote someone else first' },
+        { status: 400 }
+      );
+    }
+
+    // Block removal if the member has outstanding or pending balance.
+    const expenses = await getExpenses(context.env, group.id);
+    const balances = calculateBalances(expenses, group.members);
+    const memberBalance = balances.find((b) => b.memberId === memberId);
+    if (memberBalance && !isBalanceClear(memberBalance)) {
+      const detail = memberBalance.pendingBalance !== 0
+        ? 'They have pending transactions that must be settled first.'
+        : 'They have an outstanding balance that must be settled first.';
+      return Response.json(
+        { success: false, error: `Cannot remove member: ${detail}` },
         { status: 400 }
       );
     }
