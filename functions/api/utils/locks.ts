@@ -8,7 +8,7 @@
 
 import type { AuthEnv } from '../types/auth';
 
-const LOCK_TTL_SECONDS = 10;
+const LOCK_TTL_SECONDS = 60;
 
 export interface LockHandle {
   release: () => Promise<void>;
