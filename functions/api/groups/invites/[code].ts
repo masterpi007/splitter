@@ -152,9 +152,10 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
       await lock.release();
     }
   } catch (error) {
-    console.error('Accept invite error:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Accept invite error:', message, error);
     return Response.json(
-      { success: false, error: 'Failed to accept invite' },
+      { success: false, error: `Failed to accept invite: ${message}` },
       { status: 500 }
     );
   }

@@ -12,15 +12,14 @@ import type { Member } from '../types';
 
 const API_BASE = '/api';
 
-// Active group is held in localStorage so it survives reloads. New sessions
-// default to the legacy 1matrix group — single-group users never need to know
-// groups exist. The AppContext is the canonical reader/writer of this key.
+// Active group is held in localStorage so it survives reloads. No default —
+// users create their first group after sign-in. The AppContext is the
+// canonical reader/writer of this key.
 const ACTIVE_GROUP_KEY = 'splitter.activeGroupId';
-export const LEGACY_GROUP_ID = '1matrix';
 
-export function getActiveGroupId(): string {
-  if (typeof localStorage === 'undefined') return LEGACY_GROUP_ID;
-  return localStorage.getItem(ACTIVE_GROUP_KEY) || LEGACY_GROUP_ID;
+export function getActiveGroupId(): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  return localStorage.getItem(ACTIVE_GROUP_KEY);
 }
 
 export function setActiveGroupId(groupId: string): void {
@@ -43,11 +42,12 @@ async function fetchApi<T>(
   options?: RequestInit & { groupId?: string },
 ): Promise<T> {
   const { groupId, ...init } = options ?? {};
+  const activeGroupId = groupId ?? getActiveGroupId();
   const response = await fetch(`${API_BASE}${endpoint}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      'X-Group-Id': groupId ?? getActiveGroupId(),
+      ...(activeGroupId ? { 'X-Group-Id': activeGroupId } : {}),
       ...init?.headers,
     },
   });
@@ -80,6 +80,13 @@ export async function createGroup(
 
 export async function getGroup(groupId?: string): Promise<Group> {
   return fetchApi<Group>('/group', groupId ? { groupId } : undefined);
+}
+
+export async function deleteGroup(groupId: string): Promise<void> {
+  await fetchApi<void>(`/groups/${encodeURIComponent(groupId)}`, {
+    method: 'DELETE',
+    groupId,
+  });
 }
 
 export async function updateGroup(updates: Partial<Group>): Promise<Group> {
@@ -233,9 +240,10 @@ export async function processReceipt(file: File): Promise<ReceiptOCRResult> {
   const formData = new FormData();
   formData.append('receipt', file);
 
+  const activeGroupId = getActiveGroupId();
   const response = await fetch(`${API_BASE}/receipts/process`, {
     method: 'POST',
-    headers: { 'X-Group-Id': getActiveGroupId() },
+    headers: activeGroupId ? { 'X-Group-Id': activeGroupId } : undefined,
     body: formData,
   });
 

@@ -1,18 +1,31 @@
-import { ReactNode } from 'react';
+import { ReactNode, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Navigation } from './Navigation';
 import { MemberSelector } from './MemberSelector';
 import { NotificationBell } from './NotificationBell';
 import { useApp } from '../context/AppContext';
+import { useAuthContext } from './auth';
 
 interface LayoutProps {
   children: ReactNode;
 }
 
 export function Layout({ children }: LayoutProps) {
-  const { loading, error, group } = useApp();
+  const { loading, error, group, groups } = useApp();
+  const { authenticated, loading: authLoading } = useAuthContext();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // User-first: once auth and group list are resolved, guide the user
+  // to create their first group if they have none.
+  useEffect(() => {
+    if (authLoading || loading) return;
+    if (!authenticated) return;
+    const onGroupsRoute = location.pathname.startsWith('/groups') || location.pathname.startsWith('/invite');
+    if (groups.length === 0 && !onGroupsRoute) {
+      navigate('/groups/new', { replace: true });
+    }
+  }, [authenticated, authLoading, loading, groups.length, location.pathname, navigate]);
 
   // The back button is a hardcoded "return to groups list" affordance —
   // simpler than history-based nav, which gets confusing when users land

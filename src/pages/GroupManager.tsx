@@ -145,6 +145,15 @@ export function GroupManager() {
 
   const handleLeave = () => handleRemoveMember(currentMember.id);
 
+  const handleDeleteGroup = async () => {
+    if (!confirm(`Delete "${group.name}" permanently? This cannot be undone. All expenses, invites, and member data will be lost.`)) return;
+    const ok = await wrap('delete-group', () => api.deleteGroup(group.id));
+    if (ok !== null) {
+      await refreshGroups();
+      navigate('/groups');
+    }
+  };
+
   const handleAddFriend = async (friend: FriendCandidate) => {
     const updated = await wrap(`add-friend-${friend.userId}`, () =>
       api.addFriendToGroup(friend.userId),
@@ -394,20 +403,40 @@ export function GroupManager() {
       </section>
 
       {/* --- Danger zone --- */}
-      <section className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-4">
-        <h2 className="font-medium text-gray-100 mb-1">Leave group</h2>
-        <p className="text-xs text-gray-500 mb-3">
-          Your expense history stays visible to remaining members. {group.admins.length <= 1 && group.admins.includes(currentMember.id) && (
-            <span className="text-yellow-400">You're the only admin — promote someone else before leaving.</span>
-          )}
-        </p>
-        <button
-          onClick={handleLeave}
-          disabled={busy === `remove-${currentMember.id}` || (group.admins.length <= 1 && group.admins.includes(currentMember.id))}
-          className="text-sm px-3 py-1.5 border border-red-800 text-red-300 rounded hover:bg-red-900/30 disabled:opacity-50"
-        >
-          Leave {group.name}
-        </button>
+      <section className="bg-gray-800 border border-red-900/40 rounded-xl px-4 py-4 space-y-4">
+        <h2 className="font-medium text-red-400">Danger zone</h2>
+
+        <div>
+          <p className="text-sm text-gray-300 font-medium mb-0.5">Leave group</p>
+          <p className="text-xs text-gray-500 mb-2">
+            Your expense history stays visible to remaining members. {group.admins.length <= 1 && group.admins.includes(currentMember.id) && (
+              <span className="text-yellow-400">You're the only admin — promote someone else before leaving.</span>
+            )}
+          </p>
+          <button
+            onClick={handleLeave}
+            disabled={busy === `remove-${currentMember.id}` || (group.admins.length <= 1 && group.admins.includes(currentMember.id))}
+            className="text-sm px-3 py-1.5 border border-red-800 text-red-300 rounded hover:bg-red-900/30 disabled:opacity-50"
+          >
+            Leave {group.name}
+          </button>
+        </div>
+
+        {isAdmin && (
+          <div className="border-t border-gray-700 pt-4">
+            <p className="text-sm text-gray-300 font-medium mb-0.5">Delete group</p>
+            <p className="text-xs text-gray-500 mb-2">
+              Permanently deletes all expenses, invites, and member data. Cannot be undone.
+            </p>
+            <button
+              onClick={handleDeleteGroup}
+              disabled={busy === 'delete-group'}
+              className="text-sm px-3 py-1.5 bg-red-900/40 border border-red-700 text-red-300 rounded hover:bg-red-900/70 disabled:opacity-50"
+            >
+              {busy === 'delete-group' ? 'Deleting…' : `Delete ${group.name}`}
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );

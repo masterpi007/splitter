@@ -13,16 +13,27 @@ import {
 // bootstrap (MemberSelector → addMember → /api/auth/register/verify) can
 // load the existing member list before the user has a passkey. Every other
 // group still requires membership.
+function createEmptyLegacyGroup(): GroupRecord {
+  return {
+    id: LEGACY_GROUP_ID,
+    name: 'Expenses',
+    currency: 'K',
+    admins: [],
+    members: [],
+    removedMembers: [],
+    createdAt: new Date().toISOString(),
+  };
+}
+
 export const onRequestGet: PagesFunction<AuthEnv> = async (context) => {
   try {
     const groupId = extractGroupId(context.request);
     if (groupId === LEGACY_GROUP_ID) {
       const group = await getGroup(context.env, groupId);
       if (!group) {
-        return Response.json(
-          { success: false, error: 'Group not found' },
-          { status: 404 }
-        );
+        const emptyGroup = createEmptyLegacyGroup();
+        await saveGroup(context.env, emptyGroup);
+        return Response.json({ success: true, data: emptyGroup });
       }
       return Response.json({ success: true, data: group });
     }
@@ -109,13 +120,7 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
       if (settingsTouched) return authed;
       if (!updates.members) return authed;
 
-      const group = await getGroup(context.env, groupId);
-      if (!group) {
-        return Response.json(
-          { success: false, error: 'Group not found' },
-          { status: 404 }
-        );
-      }
+      const group = (await getGroup(context.env, groupId)) ?? createEmptyLegacyGroup();
       const members = applyPlaceholderAdd(group, updates.members);
       if (members instanceof Response) return members;
       const duplicateName = findDuplicateName(members);

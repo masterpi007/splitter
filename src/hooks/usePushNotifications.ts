@@ -82,11 +82,12 @@ export function usePushNotifications(): UsePushNotificationsReturn {
       // resubscribes per group — each group has its own preferences and
       // notification history.
       const subJson = subscription.toJSON();
+      const activeGroupId = getActiveGroupId();
       await fetch('/api/push/subscribe', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Group-Id': getActiveGroupId(),
+          ...(activeGroupId ? { 'X-Group-Id': activeGroupId } : {}),
         },
         credentials: 'include',
         body: JSON.stringify({
@@ -111,11 +112,12 @@ export function usePushNotifications(): UsePushNotificationsReturn {
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.getSubscription();
       if (subscription) {
+        const activeGroupId = getActiveGroupId();
         await fetch('/api/push/subscribe', {
           method: 'DELETE',
           headers: {
             'Content-Type': 'application/json',
-            'X-Group-Id': getActiveGroupId(),
+            ...(activeGroupId ? { 'X-Group-Id': activeGroupId } : {}),
           },
           credentials: 'include',
           body: JSON.stringify({ endpoint: subscription.endpoint }),

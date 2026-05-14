@@ -10,11 +10,11 @@ import {
 } from 'react';
 import { Group, GroupSummary, Expense, Member } from '../types';
 import * as api from '../api/client';
-import { LEGACY_GROUP_ID, getActiveGroupId, setActiveGroupId, ApiError } from '../api/client';
+import { getActiveGroupId, setActiveGroupId, ApiError } from '../api/client';
 import { resolveExpenseSplits } from '../utils/balances';
 
 interface AppContextType {
-  activeGroupId: string;
+  activeGroupId: string | null;
   groups: GroupSummary[];
   group: Group | null;
   expenses: Expense[];
@@ -44,8 +44,8 @@ const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   // Active group is held in localStorage (via api/client helpers) so it survives
-  // reloads. Default is LEGACY_GROUP_ID; single-group users never see a picker.
-  const [activeGroupId, setActiveGroupIdState] = useState<string>(getActiveGroupId());
+  // reloads. Null when user has no groups yet.
+  const [activeGroupId, setActiveGroupIdState] = useState<string | null>(getActiveGroupId());
   const [groups, setGroups] = useState<GroupSummary[]>([]);
   const [group, setGroup] = useState<Group | null>(null);
   const [rawExpenses, setExpenses] = useState<Expense[]>([]);
@@ -81,9 +81,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setGroups(list);
       // If the current active group isn't in the list, fall back to the first
       // membership the user has. Never leaves the user on a group they've been
-      // removed from.
+      // removed from. If the user has no groups, clear the active selection.
       if (list.length > 0 && !list.some((g) => g.id === activeGroupId)) {
         setActiveGroup(list[0].id);
+      } else if (list.length === 0 && activeGroupId) {
+        setActiveGroupIdState(null);
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem('splitter.activeGroupId');
+        }
       }
     } catch {
       // If listing fails (e.g. not authenticated yet) leave empty silently.
@@ -107,11 +112,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // user has switched groups can be discarded instead of applied to state
   // for the new group. Without this guard, any in-flight refresh (SW event,
   // visibilitychange, retry) would silently splice stale data in.
-  const refreshTargetRef = useRef<string>(getActiveGroupId());
+  const refreshTargetRef = useRef<string | null>(getActiveGroupId());
 
   const refreshData = useCallback(async () => {
     const targetGroupId = getActiveGroupId();
     refreshTargetRef.current = targetGroupId;
+    if (!targetGroupId) {
+      setGroup(null);
+      setExpenses([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     // Settle independently so a 401 on expenses (unauthenticated caller)
     // doesn't block the group from loading. The legacy group is readable
@@ -141,9 +152,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     if (!firstError) {
       setError(null);
-    } else if (firstError instanceof ApiError && firstError.status === 401) {
-      // Unauthenticated: let the sign-in UI handle it, not the error screen.
+    } else if (firstError instanceof ApiError && (firstError.status === 401 || firstError.status === 404)) {
+      // Unauthenticated or missing active group: let auth/group picker flow recover.
       setError(null);
+      if (firstError.status === 404) {
+        setGroup(null);
+        setExpenses([]);
+      }
     } else {
       setError(firstError instanceof Error ? firstError.message : 'Failed to fetch data');
     }
@@ -153,15 +168,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addMember = useCallback(
     async (name: string): Promise<Member | null> => {
       if (!group) return null;
-      // This path exists for the legacy 1matrix self-registration flow: the
-      // new user types a name, MemberSelector adds the placeholder, then
-      // /api/auth/register/verify binds a passkey to it. register/verify
-      // only works against the legacy group, so calling addMember in any
-      // other group would leave a dangling placeholder nobody could claim.
-      // Direct-add into a real group goes through api.addFriendToGroup.
-      if (group.id !== LEGACY_GROUP_ID) {
-        throw new Error('Use invite link or direct-add in multi-group mode');
-      }
       const trimmedName = name.trim();
       const newMember: Member = {
         id: crypto.randomUUID(),

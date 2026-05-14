@@ -4,7 +4,7 @@ pages_build_output_dir = "dist"
 
 [[kv_namespaces]]
 binding = "SPLITTER_KV"
-id = "c23e2dd45e264bf29351ea5a0dd7eb40"
+id = "d39351a8dc64417c879863e174de9c8b"
 
 [vars]
 # For production, set these via Cloudflare dashboard or `wrangler secret put`:
@@ -13,11 +13,11 @@ id = "c23e2dd45e264bf29351ea5a0dd7eb40"
 # - RP_ORIGIN: Your production URL (e.g., "https://splitter.example.com")
 
 # Development values (safe to commit)
-RP_ID = "split.vietcha.in"
+RP_ID = "split.helios-stake.org"
 RP_NAME = "Splitter"
-RP_ORIGIN = "https://split.vietcha.in"
-VAPID_PUBLIC_KEY = "BFaLpuZ_l3_uTnclgsBlfvBp25lsGUNQInBSu0ilHI-osHjghf-RlLatMh7Xlz-DexkDqHQZUulz19OQqjuFkcc"
-VAPID_SUBJECT = "mailto:admin@split.vietcha.in"
+RP_ORIGIN = "https://split.helios-stake.org"
+VAPID_PUBLIC_KEY = "BGk9DjrVqgTy7XjrVKRGEBVEIOxn1tXfMwQeIduK6xoY1xKxgjXdqfK_nftr9D4FfMouID5SdPcWPpsirn8hO2E"
+VAPID_SUBJECT = "mailto:admin@split.helios-stake.org"
 
 [ai]
 binding = "AI"

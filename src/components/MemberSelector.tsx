@@ -9,7 +9,7 @@ import type { Member } from '../types';
 type AuthFlow = 'signin' | 'register' | 'edit-profile' | null;
 
 export function MemberSelector() {
-  const { group, currentUser, setCurrentUser, addMember, updateProfile } = useApp();
+  const { group, currentUser, setCurrentUser, updateProfile } = useApp();
   const {
     authenticated,
     session,
@@ -67,32 +67,17 @@ export function MemberSelector() {
     clearWebAuthnError();
 
     try {
-      // Check if member already exists (case-insensitive)
-      const existingMember = group?.members.find(
-        m => m.name.toLowerCase() === newName.trim().toLowerCase()
-      );
-
-      let member;
-      if (existingMember) {
-        // Use existing member (re-registration for member without passkey)
-        member = existingMember;
-      } else {
-        // Create new member
-        member = await addMember(newName.trim());
-        if (!member) {
-          throw new Error('Failed to create member');
-        }
-      }
-
-      // Register passkey for member
-      await register(member.id, member.name);
+      // New flow: register creates a standalone User with no group membership.
+      // After sign-in, the user creates their first group via /groups/new.
+      const userId = crypto.randomUUID();
+      await register(userId, newName.trim());
       setNewName('');
       setAuthFlow(null);
     } catch (err) {
       // Show specific error for already registered case
       const message = err instanceof Error ? err.message : 'Registration failed';
       if (message.includes('already registered') || message.includes('credential already exists')) {
-        setRegisterError('This user already has a passkey. Please sign in instead.');
+        setRegisterError('This passkey is already registered. Please sign in instead.');
       }
       // Other errors shown via webAuthnError
     }
@@ -123,12 +108,15 @@ export function MemberSelector() {
     clearWebAuthnError();
   };
 
-  // Compute avatar at top level (Rules of Hooks: no hooks inside conditionals)
+  // Compute avatar at top level (Rules of Hooks: no hooks inside conditionals).
+  // Falls back to session.userName when user has no group membership yet.
+  const avatarSeed = currentUser?.avatarSeed || currentUser?.name || session?.userName || '';
   const avatarSvg = useMemo(() => {
-    if (!currentUser) return '';
-    return createAvatar(thumbs, { seed: currentUser.avatarSeed || currentUser.name, size: 36 }).toString();
-  }, [currentUser?.name, currentUser?.avatarSeed]);
-  const avatarUrl = currentUser ? `data:image/svg+xml;utf8,${encodeURIComponent(avatarSvg)}` : '';
+    if (!avatarSeed) return '';
+    return createAvatar(thumbs, { seed: avatarSeed, size: 36 }).toString();
+  }, [avatarSeed]);
+  const avatarDisplayName = currentUser?.name || session?.userName || '';
+  const avatarUrl = avatarSeed ? `data:image/svg+xml;utf8,${encodeURIComponent(avatarSvg)}` : '';
 
   if (!isSupported) {
     return (
@@ -143,17 +131,17 @@ export function MemberSelector() {
     return <div className="text-sm text-gray-400">Loading...</div>;
   }
 
-  // Authenticated state
-  if (authenticated && currentUser) {
+  // Authenticated state — show avatar whenever signed in, even before first group.
+  if (authenticated) {
     return (
       <>
         <button
           onClick={handleEditProfile}
           className="cursor-pointer w-9 h-9 rounded-full overflow-hidden shrink-0 hover:opacity-80 transition-opacity"
-          title={currentUser.name}
+          title={avatarDisplayName}
           aria-label="Profile"
         >
-          <img src={avatarUrl} alt={currentUser.name} className="w-full h-full" />
+          <img src={avatarUrl} alt={avatarDisplayName} className="w-full h-full" />
         </button>
 
         <ProfileModal

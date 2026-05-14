@@ -4,13 +4,12 @@ import { consumeChallenge } from '../../utils/challenges';
 import { addCredential, getCredentials, findCredentialOwner } from '../../utils/credentials';
 import { createSession, createAuthCookie } from '../../utils/jwt';
 import {
-  LEGACY_GROUP_ID,
   GroupMember,
   GroupRecord,
   getGroup,
   saveGroup,
 } from '../../utils/groups';
-import { createUser, getUser, addMembership } from '../../utils/users';
+import { createUser, addMembership } from '../../utils/users';
 import { getInvite } from '../../utils/invites';
 
 // Register a brand-new User and attach them to a group. Two target-group
@@ -41,10 +40,10 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     const env = context.env;
     const userId = memberId;
 
-    // Resolve the target group from trusted state: legacy by default, invite
-    // record when an invite code is supplied. Refuse bad codes early so the
-    // WebAuthn challenge isn't burned on a dead request.
-    let targetGroupId: string;
+    // Resolve the target group from trusted state. If an invite code is
+    // supplied, join that group atomically. If no invite code, register a
+    // standalone User with no group — caller creates a group after sign-in.
+    let targetGroupId: string | null = null;
     if (inviteCode) {
       const invite = await getInvite(env, inviteCode);
       if (!invite) {
@@ -54,20 +53,18 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
         );
       }
       targetGroupId = invite.groupId;
-    } else {
-      targetGroupId = LEGACY_GROUP_ID;
     }
 
-    // Refuse to (re)register an identity that already exists. Adding another
-    // passkey to an existing account goes through the authenticated
+    // Refuse to (re)register an identity that already has passkeys. Adding
+    // another passkey to an existing account goes through the authenticated
     // /api/auth/passkeys/invite flow. Without this gate, any unauthenticated
     // caller who knows a legacy memberId (UUIDs are visible to every group
     // member) could append their own credential to the victim's account.
-    const [existingUser, existingCredentials] = await Promise.all([
-      getUser(env, userId),
-      getCredentials(env, userId),
-    ]);
-    if (existingCredentials.length > 0 || existingUser) {
+    // Allow registration if a User row exists but has no credentials yet
+    // (placeholder/bootstrap case — the member row was created but never
+    // claimed with a passkey).
+    const existingCredentials = await getCredentials(env, userId);
+    if (existingCredentials.length > 0) {
       return Response.json(
         { success: false, error: 'This member is already registered' },
         { status: 409 }
@@ -126,39 +123,33 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     // fresh registration.
     const user = await createUser(env, { id: userId, name: memberName });
 
-    // Ensure the group exists and the member row points at this user.
-    const group = await getGroup(env, targetGroupId);
-    if (!group) {
-      return Response.json(
-        { success: false, error: `Group ${targetGroupId} not found` },
-        { status: 404 }
-      );
-    }
-
     const now = new Date().toISOString();
-    // Attach the new user to the target group. Legacy keeps the
-    // memberId === userId invariant so the existing row (created by the
-    // MemberSelector pre-flight PUT) is claimed in place. Invite path mints
-    // a fresh memberId unless a placeholder's name matches — same behavior
-    // as POST /api/groups/invites/:code (see that file for rationale).
-    const { memberId: attachedMemberId, conflict } = attachToGroup(
-      group,
-      userId,
-      memberName,
-      { legacy: !inviteCode, clientMemberId: memberId, now },
-    );
-    if (conflict) return conflict;
 
-    // Write membership first so a crashed partial write leaves state that
-    // /api/groups can recover (a stale membership with an unknown memberId
-    // is filtered out; a missing membership would hide the group from the
-    // user who just registered).
-    await addMembership(env, userId, {
-      groupId: targetGroupId,
-      memberId: attachedMemberId,
-      joinedAt: now,
-    });
-    await saveGroup(env, group);
+    if (targetGroupId) {
+      // Invite flow: attach the new user to the invited group.
+      const group = await getGroup(env, targetGroupId);
+      if (!group) {
+        return Response.json(
+          { success: false, error: `Group ${targetGroupId} not found` },
+          { status: 404 }
+        );
+      }
+
+      const { memberId: attachedMemberId, conflict } = attachToGroup(
+        group,
+        userId,
+        memberName,
+        { legacy: false, clientMemberId: memberId, now },
+      );
+      if (conflict) return conflict;
+
+      await addMembership(env, userId, {
+        groupId: targetGroupId,
+        memberId: attachedMemberId,
+        joinedAt: now,
+      });
+      await saveGroup(env, group);
+    }
 
     const { registrationInfo } = verification;
     const storedCredential: StoredCredential = {
