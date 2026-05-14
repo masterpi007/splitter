@@ -1,19 +1,15 @@
 import type { AuthEnv } from '../types/auth';
 import { createSession, createAuthCookie } from '../utils/jwt';
-import { requireGroup } from '../utils/session';
+import { requireSession, requireGroup } from '../utils/session';
 import { saveGroup } from '../utils/groups';
 import { getUser, saveUser } from '../utils/users';
 
-// PUT /api/auth/profile — update the caller's per-group member profile
-// (name, avatar, bank). Also updates the global User.name so it stays in
-// sync across groups (last-write-wins — users can refine later if they
-// want different names per group).
+// PUT /api/auth/profile — update the caller's profile.
+// When X-Group-Id is present and the caller is a member, also updates the
+// per-group member row (name, avatar, bank). When the caller has no active
+// group (X-Group-Id absent), updates the global User record only.
 export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
   try {
-    const ctx = await requireGroup(context.env, context.request);
-    if (ctx instanceof Response) return ctx;
-    const { session, group, member } = ctx;
-
     const {
       name,
       avatarSeed,
@@ -57,46 +53,79 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
       }
     }
 
-    const nameExists = group.members.some(
-      (m) => m.id !== member.id && m.name.toLowerCase() === trimmedName.toLowerCase()
-    );
-    if (nameExists) {
-      return Response.json(
-        { success: false, error: 'Name already taken' },
-        { status: 400 }
+    // Try group context first (updates both group member row and User).
+    const groupCtx = await requireGroup(context.env, context.request);
+    if (!(groupCtx instanceof Response)) {
+      const { session, group, member } = groupCtx;
+
+      const nameExists = group.members.some(
+        (m) => m.id !== member.id && m.name.toLowerCase() === trimmedName.toLowerCase()
+      );
+      if (nameExists) {
+        return Response.json(
+          { success: false, error: 'Name already taken' },
+          { status: 400 }
+        );
+      }
+
+      const updatedMember = {
+        ...member,
+        name: trimmedName,
+        ...(avatarSeed !== undefined && { avatarSeed }),
+        ...(bankId !== undefined && { bankId }),
+        ...(bankName !== undefined && { bankName }),
+        ...(bankShortName !== undefined && { bankShortName }),
+        ...(accountName !== undefined && { accountName }),
+        ...(accountNo !== undefined && { accountNo }),
+      };
+      const updatedGroup = {
+        ...group,
+        members: group.members.map((m) => (m.id === member.id ? updatedMember : m)),
+      };
+      await saveGroup(context.env, updatedGroup);
+
+      const user = await getUser(context.env, session.userId);
+      if (user && user.name !== trimmedName) {
+        await saveUser(context.env, { ...user, name: trimmedName });
+      }
+
+      const { token: newToken } = await createSession(context.env, session.userId, trimmedName);
+
+      return new Response(
+        JSON.stringify({ success: true, data: updatedMember }),
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Set-Cookie': createAuthCookie(newToken),
+          },
+        }
       );
     }
 
-    const updatedMember = {
-      ...member,
-      name: trimmedName,
-      ...(avatarSeed !== undefined && { avatarSeed }),
-      ...(bankId !== undefined && { bankId }),
-      ...(bankName !== undefined && { bankName }),
-      ...(bankShortName !== undefined && { bankShortName }),
-      ...(accountName !== undefined && { accountName }),
-      ...(accountNo !== undefined && { accountNo }),
-    };
-    const updatedGroup = {
-      ...group,
-      members: group.members.map((m) => (m.id === member.id ? updatedMember : m)),
-    };
-    await saveGroup(context.env, updatedGroup);
+    // No group context — update User record only (user not yet in any group).
+    const authed = await requireSession(context.env, context.request);
+    if (authed instanceof Response) return authed;
+    const { session } = authed;
 
-    // Sync User.name so future sessions and cross-group name prompts use it.
     const user = await getUser(context.env, session.userId);
-    if (user && user.name !== trimmedName) {
-      await saveUser(context.env, { ...user, name: trimmedName });
+    if (!user) {
+      return Response.json({ success: false, error: 'User not found' }, { status: 404 });
     }
 
-    const { token: newToken } = await createSession(
-      context.env,
-      session.userId,
-      trimmedName,
-    );
+    await saveUser(context.env, { ...user, name: trimmedName });
+
+    const { token: newToken } = await createSession(context.env, session.userId, trimmedName);
+
+    // Return a synthetic member shape so the client type stays consistent.
+    const syntheticMember = {
+      id: session.userId,
+      userId: session.userId,
+      name: trimmedName,
+      ...(avatarSeed !== undefined && { avatarSeed }),
+    };
 
     return new Response(
-      JSON.stringify({ success: true, data: updatedMember }),
+      JSON.stringify({ success: true, data: syntheticMember }),
       {
         headers: {
           'Content-Type': 'application/json',
