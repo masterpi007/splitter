@@ -23,7 +23,7 @@ export function Layout({ children }: LayoutProps) {
     if (!authenticated) return;
     const onGroupsRoute = location.pathname.startsWith('/groups') || location.pathname.startsWith('/invite');
     if (groups.length === 0 && !onGroupsRoute) {
-      navigate('/groups/new', { replace: true });
+      navigate('/groups', { replace: true });
     }
   }, [authenticated, authLoading, loading, groups.length, location.pathname, navigate]);
 
