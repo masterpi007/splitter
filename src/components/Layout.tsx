@@ -11,7 +11,7 @@ interface LayoutProps {
 }
 
 export function Layout({ children }: LayoutProps) {
-  const { loading, error, group, groups } = useApp();
+  const { loading, groupsLoading, error, group, groups } = useApp();
   const { authenticated, loading: authLoading } = useAuthContext();
   const navigate = useNavigate();
   const location = useLocation();
@@ -19,13 +19,13 @@ export function Layout({ children }: LayoutProps) {
   // User-first: once auth and group list are resolved, guide the user
   // to create their first group if they have none.
   useEffect(() => {
-    if (authLoading || loading) return;
+    if (authLoading || loading || groupsLoading) return;
     if (!authenticated) return;
     const onGroupsRoute = location.pathname.startsWith('/groups') || location.pathname.startsWith('/invite');
     if (groups.length === 0 && !onGroupsRoute) {
       navigate('/groups', { replace: true });
     }
-  }, [authenticated, authLoading, loading, groups.length, location.pathname, navigate]);
+  }, [authenticated, authLoading, loading, groupsLoading, groups.length, location.pathname, navigate]);
 
   // The back button is a hardcoded "return to groups list" affordance —
   // simpler than history-based nav, which gets confusing when users land

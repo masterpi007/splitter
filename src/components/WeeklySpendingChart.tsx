@@ -1,46 +1,81 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { WeeklySpending, formatCurrency, formatNumber } from '../utils/balances';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Expense } from '../types';
+import { formatCurrency, formatNumber, calculateWeeklySpending, calculateDailySpending, calculateMonthlySpending } from '../utils/balances';
 
 interface Props {
-  data: WeeklySpending[];
+  expenses: Expense[];
+  currentUserId: string | null;
   currency: string;
   hasUser: boolean;
 }
 
-type Mode = 'group' | 'user';
+type ViewMode = 'group' | 'user';
+type Period = 'day' | 'week' | 'month';
 
-const WEEK_WIDTH = 56;
+const PERIOD_WIDTH: Record<Period, number> = { day: 40, week: 56, month: 64 };
 const CHART_HEIGHT = 170;
 const PAD_TOP = 28;
 const PAD_BOTTOM = 28;
 const PAD_X = 12;
 
-function formatWeekLabel(weekStart: string): string {
-  const [y, m, d] = weekStart.split('-').map(Number);
+function formatLabel(periodStart: string, period: Period): string {
+  const [y, m, d] = periodStart.split('-').map(Number);
   const date = new Date(y, m - 1, d);
+  if (period === 'month') {
+    return date.toLocaleDateString('en-US', { month: 'short' });
+  }
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-export function WeeklySpendingChart({ data, currency, hasUser }: Props) {
-  const [mode, setMode] = useState<Mode>('group');
-  const [selected, setSelected] = useState<number>(data.length - 1);
+function formatPeriodLabel(periodStart: string, period: Period): string {
+  const [y, m, d] = periodStart.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  if (period === 'day') return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  if (period === 'month') return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  return `Week of ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+}
+
+export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser }: Props) {
+  const [viewMode, setViewMode] = useState<ViewMode>('group');
+  const [period, setPeriod] = useState<Period>('week');
+  const [selected, setSelected] = useState<number>(-1);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
 
-  // Keep selection in range if data length changes.
+  const data = useMemo(() => {
+    if (period === 'day') return calculateDailySpending(expenses, currentUserId);
+    if (period === 'month') return calculateMonthlySpending(expenses, currentUserId);
+    return calculateWeeklySpending(expenses, currentUserId);
+  }, [expenses, currentUserId, period]);
+
+  // Reset selection to last bucket when data changes.
   useEffect(() => {
-    if (data.length === 0) return;
-    if (selected < 0 || selected >= data.length) {
-      setSelected(data.length - 1);
-    }
-  }, [data.length, selected]);
+    setSelected(data.length - 1);
+  }, [data.length, period]);
 
-  // Scroll newest week into view. Use layout effect so the scroll happens
-  // before paint and there's no visible jump.
+  // Scroll newest bucket into view on period change.
   useLayoutEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+    if (viewportRef.current) {
+      viewportRef.current.scrollLeft = viewportRef.current.scrollWidth;
     }
-  }, [mode, data.length]);
+  }, [viewMode, data.length, period]);
+
+  // Re-run when data becomes available (first render may have been the empty fallback,
+  // so viewportRef.current was null and deps=[] would never re-fire).
+  useLayoutEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    setContainerWidth(el.clientWidth);
+  }, [data.length]);
+
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => setContainerWidth(el.clientWidth));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [data.length]);
 
   if (data.length === 0) {
     return (
@@ -50,16 +85,21 @@ export function WeeklySpendingChart({ data, currency, hasUser }: Props) {
     );
   }
 
-  const effectiveMode: Mode = hasUser ? mode : 'group';
+  const effectiveMode: ViewMode = hasUser ? viewMode : 'group';
   const values = data.map((d) => (effectiveMode === 'group' ? d.groupTotal : d.userShare));
   const maxValue = Math.max(...values, 1);
 
+  const barWidth = PERIOD_WIDTH[period];
   const innerHeight = CHART_HEIGHT - PAD_TOP - PAD_BOTTOM;
-  const innerWidth = Math.max(data.length * WEEK_WIDTH, 280);
+  const usableContainerWidth = Math.max(containerWidth - PAD_X * 2, 0);
+  const naturalInnerWidth = data.length * barWidth;
+  const shouldStretch = data.length > 0 && usableContainerWidth > naturalInnerWidth;
+  const effectiveBarWidth = shouldStretch ? usableContainerWidth / data.length : barWidth;
+  const innerWidth = shouldStretch ? usableContainerWidth : naturalInnerWidth;
   const width = innerWidth + PAD_X * 2;
 
   const points = values.map((v, i) => ({
-    x: PAD_X + i * WEEK_WIDTH + WEEK_WIDTH / 2,
+    x: PAD_X + i * effectiveBarWidth + effectiveBarWidth / 2,
     y: PAD_TOP + innerHeight * (1 - v / maxValue),
     value: v,
   }));
@@ -70,24 +110,35 @@ export function WeeklySpendingChart({ data, currency, hasUser }: Props) {
       ? `${linePath} L${points[points.length - 1].x},${PAD_TOP + innerHeight} L${points[0].x},${PAD_TOP + innerHeight} Z`
       : '';
 
-  const selectedWeek = data[selected] ?? data[data.length - 1];
-  const selectedValue = effectiveMode === 'group' ? selectedWeek.groupTotal : selectedWeek.userShare;
+  const selIdx = selected >= 0 && selected < data.length ? selected : data.length - 1;
+  const selectedBucket = data[selIdx];
+  const selectedValue = effectiveMode === 'group' ? selectedBucket.groupTotal : selectedBucket.userShare;
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold">Weekly spending</h3>
+      <div className="flex items-center justify-between mb-3 gap-2">
+        <div className="inline-flex rounded-md overflow-hidden border border-gray-700 text-sm">
+          {(['day', 'week', 'month'] as Period[]).map((p) => (
+            <button
+              key={p}
+              onClick={() => setPeriod(p)}
+              className={`px-3 py-1 capitalize ${period === p ? 'bg-cyan-600 text-white' : 'bg-gray-900 text-gray-300 hover:bg-gray-700'}`}
+            >
+              {p === 'day' ? 'Day' : p === 'week' ? 'Week' : 'Month'}
+            </button>
+          ))}
+        </div>
         {hasUser && (
           <div className="inline-flex rounded-md overflow-hidden border border-gray-700 text-sm">
             <button
-              onClick={() => setMode('group')}
-              className={`px-3 py-1 ${mode === 'group' ? 'bg-cyan-600 text-white' : 'bg-gray-900 text-gray-300 hover:bg-gray-700'}`}
+              onClick={() => setViewMode('group')}
+              className={`px-3 py-1 ${viewMode === 'group' ? 'bg-cyan-600 text-white' : 'bg-gray-900 text-gray-300 hover:bg-gray-700'}`}
             >
               Group
             </button>
             <button
-              onClick={() => setMode('user')}
-              className={`px-3 py-1 ${mode === 'user' ? 'bg-cyan-600 text-white' : 'bg-gray-900 text-gray-300 hover:bg-gray-700'}`}
+              onClick={() => setViewMode('user')}
+              className={`px-3 py-1 ${viewMode === 'user' ? 'bg-cyan-600 text-white' : 'bg-gray-900 text-gray-300 hover:bg-gray-700'}`}
             >
               You
             </button>
@@ -95,33 +146,27 @@ export function WeeklySpendingChart({ data, currency, hasUser }: Props) {
         )}
       </div>
 
-      <div ref={scrollRef} className="overflow-x-auto">
-        <svg width={width} height={CHART_HEIGHT} className="block">
+      <div ref={viewportRef} className="overflow-x-auto">
+        <div ref={scrollRef} className="w-full">
+          <svg width={width} height={CHART_HEIGHT} className="block">
           <defs>
-            <linearGradient id="weekly-area" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id="spending-area" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.3" />
               <stop offset="100%" stopColor="#06b6d4" stopOpacity="0" />
             </linearGradient>
           </defs>
-          {areaPath && <path d={areaPath} fill="url(#weekly-area)" />}
+          {areaPath && <path d={areaPath} fill="url(#spending-area)" />}
           <path d={linePath} stroke="#06b6d4" strokeWidth={2} fill="none" />
           {points.map((p, i) => (
             <g key={i} onClick={() => setSelected(i)} style={{ cursor: 'pointer' }}>
-              {/* wider invisible hit target for touch */}
-              <rect
-                x={p.x - WEEK_WIDTH / 2}
-                y={0}
-                width={WEEK_WIDTH}
-                height={CHART_HEIGHT}
-                fill="transparent"
-              />
+              <rect x={p.x - effectiveBarWidth / 2} y={0} width={effectiveBarWidth} height={CHART_HEIGHT} fill="transparent" />
               <circle
                 cx={p.x}
                 cy={p.y}
-                r={selected === i ? 5 : 3}
-                fill={selected === i ? '#22d3ee' : '#0891b2'}
-                stroke={selected === i ? '#fff' : 'none'}
-                strokeWidth={selected === i ? 1.5 : 0}
+                r={selIdx === i ? 5 : 3}
+                fill={selIdx === i ? '#22d3ee' : '#0891b2'}
+                stroke={selIdx === i ? '#fff' : 'none'}
+                strokeWidth={selIdx === i ? 1.5 : 0}
               />
               {p.value > 0 && (
                 <text
@@ -129,8 +174,8 @@ export function WeeklySpendingChart({ data, currency, hasUser }: Props) {
                   y={p.y - 9}
                   textAnchor="middle"
                   fontSize={10}
-                  fill={selected === i ? '#22d3ee' : '#9ca3af'}
-                  fontWeight={selected === i ? 600 : 400}
+                  fill={selIdx === i ? '#22d3ee' : '#9ca3af'}
+                  fontWeight={selIdx === i ? 600 : 400}
                 >
                   {formatNumber(p.value)}
                 </text>
@@ -140,18 +185,18 @@ export function WeeklySpendingChart({ data, currency, hasUser }: Props) {
                 y={CHART_HEIGHT - 8}
                 textAnchor="middle"
                 fontSize={10}
-                fill={selected === i ? '#e5e7eb' : '#9ca3af'}
+                fill={selIdx === i ? '#e5e7eb' : '#9ca3af'}
               >
-                {formatWeekLabel(data[i].weekStart)}
+                {formatLabel(data[i].weekStart, period)}
               </text>
             </g>
           ))}
-        </svg>
+          </svg>
+        </div>
       </div>
 
       <div className="mt-2 text-sm text-gray-300">
-        <span className="text-gray-500">Week of </span>
-        <span className="font-medium">{formatWeekLabel(selectedWeek.weekStart)}</span>
+        <span className="font-medium">{formatPeriodLabel(selectedBucket.weekStart, period)}</span>
         <span className="text-gray-500"> · </span>
         <span className="font-semibold text-cyan-300">{formatCurrency(selectedValue, currency)}</span>
       </div>

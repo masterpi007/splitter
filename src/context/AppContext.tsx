@@ -24,6 +24,7 @@ interface AppContextType {
   tagsByFrequency: string[];
   currentUser: Member | null;
   loading: boolean;
+  groupsLoading: boolean;
   error: string | null;
   setActiveGroup: (groupId: string) => void;
   setCurrentUser: (user: Member | null) => void;
@@ -64,6 +65,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [rawExpenses, group]);
   const [currentUser, setCurrentUserState] = useState<Member | null>(null);
   const [loading, setLoading] = useState(true);
+  const [groupsLoading, setGroupsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const setCurrentUser = useCallback((user: Member | null) => {
@@ -93,6 +95,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch {
       // If listing fails (e.g. not authenticated yet) leave empty silently.
       setGroups([]);
+    } finally {
+      setGroupsLoading(false);
     }
   }, [activeGroupId, setActiveGroup]);
 
@@ -323,6 +327,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         tagsByFrequency,
         currentUser,
         loading,
+        groupsLoading,
         error,
         setActiveGroup,
         setCurrentUser,

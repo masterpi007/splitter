@@ -5,7 +5,7 @@ import {
   TELEGRAM_CONNECT_TTL_SECONDS,
 } from '../types/auth';
 import type { TelegramData, TelegramConnectToken, NotifyPrefs, AuthEnv } from '../types/auth';
-import { editTelegramMessage, sendTelegramNotification } from '../utils/telegram';
+import { editTelegramMessage, sendTelegramNotification, createCallbackData, resolveCallback } from '../utils/telegram';
 import { getTokenFromCookies, verifySession } from '../utils/jwt';
 import {
   LEGACY_GROUP_ID,
@@ -191,28 +191,33 @@ async function handleWebhook(request: Request, env: Env): Promise<Response> {
       return;
     }
 
-    const parts = data.split(':');
-    const action = parts[0];
-    const [groupId, expenseId] = parts.length >= 3
-      ? [parts[1], parts[2]]
-      : [LEGACY_GROUP_ID, parts[1]];
+    const resolved = await resolveCallback(env, data, LEGACY_GROUP_ID);
+    if (!resolved) {
+      await ctx.answerCallbackQuery({ text: 'Invalid or expired action.' });
+      return;
+    }
+    const { action, groupId, expenseId } = resolved;
 
     if (action === 'signoff') {
       await ctx.answerCallbackQuery();
+      const cbYes = await createCallbackData(env, 'yes_signoff', groupId, expenseId);
+      const cbNo = await createCallbackData(env, 'no', groupId, expenseId);
       await ctx.editMessageReplyMarkup({
         reply_markup: { inline_keyboard: [[
-          { text: '✅ Confirm', callback_data: `yes_signoff:${groupId}:${expenseId}` },
-          { text: '❌ Cancel', callback_data: `no:${groupId}:${expenseId}` },
+          { text: '✅ Confirm', callback_data: cbYes },
+          { text: '❌ Cancel', callback_data: cbNo },
         ]] },
       });
     } else if (action === 'yes_signoff') {
       await handleSignOff(ctx, userId, groupId, expenseId, chatId, messageId, env);
     } else if (action === 'settle_accept') {
       await ctx.answerCallbackQuery();
+      const cbYes = await createCallbackData(env, 'yes_settle_accept', groupId, expenseId);
+      const cbNo = await createCallbackData(env, 'no', groupId, expenseId);
       await ctx.editMessageReplyMarkup({
         reply_markup: { inline_keyboard: [[
-          { text: '✅ Confirm receipt', callback_data: `yes_settle_accept:${groupId}:${expenseId}` },
-          { text: '❌ Cancel', callback_data: `no:${groupId}:${expenseId}` },
+          { text: '✅ Confirm receipt', callback_data: cbYes },
+          { text: '❌ Cancel', callback_data: cbNo },
         ]] },
       });
     } else if (action === 'yes_settle_accept') {

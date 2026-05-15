@@ -28,3 +28,5 @@ npm-debug.log*
 .dev.vars
 # Added by code-review-graph
 .code-review-graph/
+.claude
+wrangler.toml

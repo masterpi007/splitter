@@ -6,13 +6,12 @@ import { getDateKey, formatDateHeader, getTagColor, isDeleted } from '../utils/b
 import { Expense, Member } from '../types';
 
 export function Expenses() {
-  const { group, expenses, currentUser, deleteExpense } = useApp();
+  const { group, expenses, currentUser } = useApp();
   const [searchParams] = useSearchParams();
   const expandId = searchParams.get('expand');
   const [filter, setFilter] = useState<'all' | 'mine' | 'deleted'>('all');
   const [sortBy, setSortBy] = useState<'payment' | 'created'>('payment');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
 
   // Scroll to expanded expense on mount
   useEffect(() => {
@@ -95,17 +94,7 @@ export function Expenses() {
     return groups;
   }, [sortedExpenses]);
 
-  const handleDelete = async (expense: Expense) => {
-    if (!confirm('Are you sure you want to delete this transaction?')) return;
-    setDeleting(expense.id);
-    try {
-      await deleteExpense(expense);
-    } finally {
-      setDeleting(null);
-    }
-  };
-
-  const getMemberName = (id: string, members: Member[]) =>
+const getMemberName = (id: string, members: Member[]) =>
     members.find((m) => m.id === id)?.name || 'Unknown';
 
   const exportToCSV = () => {
@@ -183,7 +172,7 @@ export function Expenses() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
+<div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-bold">All Transactions</h2>
         <div className="flex gap-2">
           {expenses.length > 0 && (
@@ -301,14 +290,12 @@ export function Expenses() {
                     <div
                       key={expense.id}
                       id={`expense-${expense.id}`}
-                      className={deleting === expense.id ? 'opacity-50' : ''}
                     >
                       <ExpenseCard
                         expense={expense}
                         members={group.members}
                         currency={group.currency}
                         showSignOff={canSignOff}
-                        onDelete={() => handleDelete(expense)}
                         initialExpanded={expense.id === expandId}
                       />
                     </div>

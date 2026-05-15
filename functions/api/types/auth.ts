@@ -185,6 +185,7 @@ export const KV_KEYS = {
     groupId ? `push-prefs:${userId}:${groupId}` : `push-prefs:${userId}`,
   telegramRejectState: (chatId: string) => `telegram:reject-state:${chatId}`,
   debounceNotify: (expenseId: string) => `debounce:notify:${expenseId}`,
+  telegramCallback: (token: string) => `tg-cb:${token}`,
 } as const;
 
 // Constants
@@ -194,6 +195,13 @@ export const INVITE_TTL_SECONDS = 10 * 60; // 10 minutes
 export const TELEGRAM_CONNECT_TTL_SECONDS = 10 * 60; // 10 minutes
 export const TELEGRAM_REJECT_STATE_TTL_SECONDS = 5 * 60; // 5 minutes
 export const DEBOUNCE_NOTIFY_TTL_SECONDS = 30; // 30 seconds
+export const TELEGRAM_CALLBACK_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+
+export interface TelegramCallbackData {
+  action: string;
+  groupId: string;
+  expenseId: string;
+}
 
 // Telegram types
 export type NotifyEvent = keyof NotifyPrefs;

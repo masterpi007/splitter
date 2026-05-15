@@ -16,9 +16,9 @@ export const BANKS: Bank[] = [
   {
     id: "970415",
     name: "VietinBank",
-    shortName: "ICB",
+    shortName: "VTB",
     appCode: "vietinbank",
-    logo: "https://api.vietqr.io/img/ICB.png"
+    logo: "https://api.vietqr.io/img/VTB.png"
   },
   {
     id: "970407",
@@ -75,5 +75,12 @@ export const BANKS: Bank[] = [
     shortName: "STB",
     appCode: "sacombank",
     logo: "https://api.vietqr.io/img/STB.png"
+  },
+  {
+    id: "970426",
+    name: "MSB",
+    shortName: "MSB",
+    appCode: "msb",
+    logo: "https://api.vietqr.io/img/MSB.png"
   }
 ];

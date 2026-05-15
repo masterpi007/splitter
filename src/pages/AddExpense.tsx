@@ -29,7 +29,7 @@ export function AddExpense() {
   const [tagInput, setTagInput] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const [splitMode, setSplitMode] = useState<'items' | 'shares' | 'group'>('items');
+  const [splitMode, setSplitMode] = useState<'items' | 'shares' | 'group'>('shares');
   const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(new Set());
   const [memberShares, setMemberShares] = useState<Record<string, number>>({});
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'items' | 'shares' | 'group' | null>(null);

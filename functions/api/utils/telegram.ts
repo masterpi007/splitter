@@ -1,5 +1,5 @@
-import { KV_KEYS, DEFAULT_NOTIFY_PREFS, DEBOUNCE_NOTIFY_TTL_SECONDS } from '../types/auth';
-import type { NotifyPrefs, TelegramData } from '../types/auth';
+import { KV_KEYS, DEFAULT_NOTIFY_PREFS, DEBOUNCE_NOTIFY_TTL_SECONDS, TELEGRAM_CALLBACK_TTL_SECONDS } from '../types/auth';
+import type { NotifyPrefs, TelegramData, TelegramCallbackData } from '../types/auth';
 
 interface TelegramEnv {
   SPLITTER_KV: KVNamespace;
@@ -9,6 +9,43 @@ interface TelegramEnv {
 export type NotifyEvent = keyof NotifyPrefs;
 
 type InlineKeyboard = { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> };
+
+/**
+ * Create a short callback token stored in KV, returning `cb:{token}`.
+ * Telegram limits callback_data to 64 bytes; full UUID-based IDs exceed that.
+ */
+export async function createCallbackData(
+  env: { SPLITTER_KV: KVNamespace },
+  action: string,
+  groupId: string,
+  expenseId: string,
+): Promise<string> {
+  const token = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+  const data: TelegramCallbackData = { action, groupId, expenseId };
+  await env.SPLITTER_KV.put(KV_KEYS.telegramCallback(token), JSON.stringify(data), {
+    expirationTtl: TELEGRAM_CALLBACK_TTL_SECONDS,
+  });
+  return `cb:${token}`;
+}
+
+/**
+ * Resolve a callback_data string: handles `cb:{token}` (KV lookup) and the
+ * legacy `action:groupId:expenseId` format (for short IDs like the 1matrix group).
+ */
+export async function resolveCallback(
+  env: { SPLITTER_KV: KVNamespace },
+  data: string,
+  legacyGroupId: string,
+): Promise<{ action: string; groupId: string; expenseId: string } | null> {
+  if (data.startsWith('cb:')) {
+    const token = data.slice(3);
+    return env.SPLITTER_KV.get<TelegramCallbackData>(KV_KEYS.telegramCallback(token), 'json');
+  }
+  const parts = data.split(':');
+  if (parts.length >= 3) return { action: parts[0], groupId: parts[1], expenseId: parts[2] };
+  if (parts.length === 2) return { action: parts[0], groupId: legacyGroupId, expenseId: parts[1] };
+  return null;
+}
 
 /**
  * Send a Telegram notification to a member.
@@ -24,10 +61,13 @@ export async function sendTelegramNotification(
   const data = await env.SPLITTER_KV.get<TelegramData>(KV_KEYS.telegram(userId), 'json');
   if (!data) return;
 
-  // Cross-check: verify this chatId still belongs to this userId (detect stale/duplicate entries)
+  // Cross-check: verify this chatId still belongs to this userId.
   const ownerOfChat = await env.SPLITTER_KV.get(KV_KEYS.telegramChatId(data.chatId));
-  if (ownerOfChat !== userId) {
-    // Stale entry — clean up and skip
+  if (ownerOfChat === null) {
+    // Reverse mapping missing (connected before it was introduced) — backfill and continue.
+    await env.SPLITTER_KV.put(KV_KEYS.telegramChatId(data.chatId), userId);
+  } else if (ownerOfChat !== userId) {
+    // ChatId actively claimed by a different user — this entry is stale, remove it.
     await env.SPLITTER_KV.delete(KV_KEYS.telegram(userId));
     return;
   }

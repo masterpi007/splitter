@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Expense, Member } from '../types';
 import { calculateBillGoc, calculateDiscountAmount, formatCurrency, formatRelativeTime, getTagColor, isDeleted, isGroupAccepted } from '../utils/balances';
 import { SignOffButton } from './SignOffButton';
@@ -25,6 +25,11 @@ export function ExpenseCard({
   initialExpanded = false,
 }: ExpenseCardProps) {
   const { group, currentUser, updateExpense, claimExpenseItem, deleteExpense, tagsByFrequency } = useApp();
+  const navigate = useNavigate();
+
+  const openExpenseView = () => {
+    navigate(`/tx/${expense.id}`);
+  };
 
   // Tag suggestions: the group-wide frequency-sorted list (memoized in the
   // provider so it's computed once per expenses update, not once per card),
@@ -40,6 +45,7 @@ export function ExpenseCard({
   const [savingTags, setSavingTags] = useState(false);
   const [claimingItemId, setClaimingItemId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const handleDelete = async () => {
@@ -53,8 +59,11 @@ export function ExpenseCard({
   const handleConfirmDelete = async () => {
     setShowDeleteConfirm(false);
     setDeleting(true);
+    setDeleteError('');
     try {
       await deleteExpense(expense);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete');
     } finally {
       setDeleting(false);
     }
@@ -111,12 +120,28 @@ export function ExpenseCard({
   const isParticipantInItems = currentUser && expense.items?.some(item => item.memberId === currentUser.id);
   const isParticipant = isPayer || isCreator || isParticipantInSplits || isParticipantInItems;
   const isAdmin = !!(currentUser && group?.admins.includes(currentUser.id));
-  const canEdit = isParticipant || isAdmin;
-  const canDelete = isPayer || isAdmin;
+  const canDelete = isPayer || isCreator || isAdmin;
   const canEditTags = isParticipant || isAdmin;
 
   return (
-    <div className={`bg-gray-800 rounded-lg shadow-sm border ${isSettlement ? 'border-green-700' : 'border-gray-700'} p-4 ${expenseDeleted ? 'opacity-60' : ''}`}>
+    <div
+      role="link"
+      tabIndex={0}
+      onClick={openExpenseView}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openExpenseView();
+        }
+      }}
+      className={`bg-gray-800 rounded-lg shadow-sm border p-4 cursor-pointer transition-all duration-150 ${
+        expenseDeleted
+          ? 'border-gray-700 hover:shadow-[0_0_0_1px_rgba(55,65,81,0.45),0_10px_30px_rgba(55,65,81,0.12)]'
+          : allSigned
+          ? 'border-green-700 hover:shadow-[0_0_0_1px_rgba(21,128,61,0.5),0_10px_30px_rgba(21,128,61,0.18)]'
+          : 'border-yellow-700 hover:shadow-[0_0_0_1px_rgba(161,98,7,0.45),0_10px_30px_rgba(161,98,7,0.14)]'
+      } hover:-translate-y-0.5 ${expenseDeleted ? 'opacity-60' : ''}`}
+    >
       <div className="flex justify-between items-start mb-2">
         <div className="flex-1">
           {isSettlement ? (
@@ -127,7 +152,10 @@ export function ExpenseCard({
                 </span>
                 {canDelete && !expenseDeleted && (
                   <button
-                    onClick={handleDelete}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete();
+                    }}
                     disabled={deleting}
                     className="text-red-400 text-xs hover:text-red-300 disabled:opacity-50"
                   >
@@ -149,21 +177,9 @@ export function ExpenseCard({
                     Group
                   </span>
                 )}
-                <h3 className="font-medium text-gray-100">{expense.description}</h3>
-                {canEdit && (
-                  <Link
-                    to={`/edit/${expense.id}`}
-                    className="text-cyan-400 text-xs hover:text-cyan-300"
-                  >
-                    {isPayer
-                      ? 'Edit as Payer'
-                      : isCreator
-                        ? 'Edit as Creator'
-                        : isParticipant
-                          ? 'Edit as Participant'
-                          : 'Edit as Admin'}
-                  </Link>
-                )}
+                <h3 className="font-medium text-gray-100">
+                  {expense.description}
+                </h3>
               </div>
               <p className="text-sm text-gray-400">
                 Paid by <span className="text-gray-200">{getMemberName(payer?.id ?? '')}</span>
@@ -180,7 +196,8 @@ export function ExpenseCard({
               return canEditTags ? (
                 <button
                   key={tag}
-                  onClick={async () => {
+                  onClick={async (e) => {
+                    e.stopPropagation();
                     const newTags = expense.tags?.filter((t) => t !== tag) || [];
                     await updateExpense(expense.id, { tags: newTags });
                   }}
@@ -200,7 +217,10 @@ export function ExpenseCard({
             })}
             {canEditTags && !editingTags && (
               <button
-                onClick={() => setEditingTags(true)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditingTags(true);
+                }}
                 className="text-xs text-gray-500 hover:text-gray-300 min-h-[28px] px-1.5 flex items-center"
               >
                 + tag
@@ -214,6 +234,7 @@ export function ExpenseCard({
                     value={tagInput}
                     onChange={(e) => setTagInput(e.target.value)}
                     onKeyDown={async (e) => {
+                      e.stopPropagation();
                       if (e.key === 'Enter' && tagInput.trim()) {
                         setSavingTags(true);
                         const newTags = [...(expense.tags || []), tagInput.trim().toLowerCase()];
@@ -231,7 +252,8 @@ export function ExpenseCard({
                     disabled={savingTags}
                   />
                   <button
-                    onClick={async () => {
+                    onClick={async (e) => {
+                      e.stopPropagation();
                       if (tagInput.trim()) {
                         setSavingTags(true);
                         const newTags = [...(expense.tags || []), tagInput.trim().toLowerCase()];
@@ -247,7 +269,8 @@ export function ExpenseCard({
                     {savingTags ? '...' : 'OK'}
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setEditingTags(false);
                       setTagInput('');
                     }}
@@ -265,7 +288,8 @@ export function ExpenseCard({
                       return (
                         <button
                           key={tag}
-                          onClick={async () => {
+                          onClick={async (e) => {
+                            e.stopPropagation();
                             setSavingTags(true);
                             const newTags = [...(expense.tags || []), tag];
                             await updateExpense(expense.id, { tags: [...new Set(newTags)] });
@@ -292,7 +316,10 @@ export function ExpenseCard({
           <div className="flex items-center justify-end gap-2 mt-1">
             {expense.receiptUrl && (
               <button
-                onClick={() => setShowReceipt(true)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowReceipt(true);
+                }}
                 className="text-cyan-400 hover:text-cyan-300"
                 title="View receipt"
               >
@@ -351,7 +378,10 @@ export function ExpenseCard({
           {!expanded && userSplit && (
             <div
               className="cursor-pointer"
-              onClick={() => setExpanded(true)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpanded(true);
+              }}
             >
               {(() => {
                 // For payer, show only their assigned items amount (exclude unclaimed)
@@ -394,7 +424,10 @@ export function ExpenseCard({
           {!expanded && !userSplit && (
             <div
               className="cursor-pointer flex justify-between items-center"
-              onClick={() => setExpanded(true)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpanded(true);
+              }}
             >
               <p className="text-sm text-gray-400">
                 {expense.splits.length} participant{expense.splits.length !== 1 ? 's' : ''}
@@ -410,7 +443,10 @@ export function ExpenseCard({
             <div>
               <div
                 className="flex justify-between items-center mb-2 cursor-pointer"
-                onClick={() => setExpanded(false)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExpanded(false);
+                }}
               >
                 <p className="text-xs text-gray-500">
                   Split ({
@@ -465,7 +501,8 @@ export function ExpenseCard({
                           <span className="text-gray-400">({formatCurrency(singleItem.amount, currency)})</span>
                           {isMe && (
                             <button
-                              onClick={async () => {
+                              onClick={async (e) => {
+                                e.stopPropagation();
                                 setClaimingItemId(singleItem.id);
                                 await claimExpenseItem(expense.id, singleItem.id, false);
                                 setClaimingItemId(null);
@@ -501,7 +538,8 @@ export function ExpenseCard({
                                   <span>({formatCurrency(item.amount, currency)})</span>
                                   {isMe && (
                                     <button
-                                      onClick={async () => {
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
                                         setClaimingItemId(item.id);
                                         await claimExpenseItem(expense.id, item.id, false);
                                         setClaimingItemId(null);
@@ -540,7 +578,8 @@ export function ExpenseCard({
                         <span className="text-orange-400">({formatCurrency(unclaimedAmount, currency)})</span>
                         {currentUser && (
                           <button
-                            onClick={async () => {
+                            onClick={async (e) => {
+                              e.stopPropagation();
                               const item = expense.items?.find(i => !i.memberId);
                               if (item) {
                                 setClaimingItemId(item.id);
@@ -575,7 +614,8 @@ export function ExpenseCard({
                                 <span>({formatCurrency(item.amount, currency)})</span>
                                 {currentUser && (
                                   <button
-                                    onClick={async () => {
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
                                       setClaimingItemId(item.id);
                                       await claimExpenseItem(expense.id, item.id, true);
                                       setClaimingItemId(null);
@@ -602,7 +642,10 @@ export function ExpenseCard({
           {!expanded && unclaimedCount > 0 && (
             <div className="mt-2 pt-2 border-t border-gray-700">
               <button
-                onClick={() => setExpanded(true)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExpanded(true);
+                }}
                 className="text-xs text-orange-400 hover:text-orange-300 flex items-center gap-1"
               >
                 {unclaimedCount} unclaimed item{unclaimedCount !== 1 ? 's' : ''}
@@ -639,12 +682,16 @@ export function ExpenseCard({
       {canDelete && !isSettlement && !expenseDeleted && (
         <div className="mt-3 pt-3 border-t border-gray-700">
           <button
-            onClick={handleDelete}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDelete();
+            }}
             disabled={deleting}
             className="text-red-400 text-sm hover:text-red-300 disabled:opacity-50"
           >
             {deleting ? 'Deleting...' : 'Delete transaction'}
           </button>
+          {deleteError && <p className="text-red-400 text-xs mt-1">{deleteError}</p>}
         </div>
       )}
 
@@ -661,7 +708,10 @@ export function ExpenseCard({
       {showReceipt && expense.receiptUrl && (
         <div
           className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
-          onClick={() => setShowReceipt(false)}
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowReceipt(false);
+          }}
         >
           <div className="relative max-w-full max-h-full">
             <img
@@ -671,7 +721,10 @@ export function ExpenseCard({
               onClick={(e) => e.stopPropagation()}
             />
             <button
-              onClick={() => setShowReceipt(false)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowReceipt(false);
+              }}
               className="absolute top-2 right-2 bg-gray-900/70 text-gray-300 rounded-full p-2 hover:bg-gray-900"
             >
               <svg

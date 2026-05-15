@@ -27,7 +27,10 @@ export function SignOffButton({ expense, compact = false }: SignOffButtonProps) 
 
   return (
     <button
-      onClick={handleSignOff}
+      onClick={(e) => {
+        e.stopPropagation();
+        handleSignOff();
+      }}
       disabled={loading}
       className={`text-white rounded-lg font-medium disabled:opacity-50 ${
         compact ? 'py-1 px-3 text-sm' : 'w-full py-2 px-4'

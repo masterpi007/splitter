@@ -6,7 +6,6 @@ import { WeeklySpendingChart } from '../components/WeeklySpendingChart';
 import {
   calculateBalances,
   calculateSettlements,
-  calculateWeeklySpending,
   formatCurrency,
 } from '../utils/balances';
 import { YouBadge } from '../components/YouBadge';
@@ -23,14 +22,12 @@ export function Balances() {
   const allMembers = [...group.members, ...group.removedMembers];
   const balances = calculateBalances(expenses, allMembers);
   const settlements = calculateSettlements(balances);
-  const weekly = calculateWeeklySpending(expenses, currentUser?.id ?? null);
-
   const sortedBalances = [...balances].sort((a, b) => b.signedBalance - a.signedBalance);
 
   return (
     <div className="space-y-8">
       <section>
-        <WeeklySpendingChart data={weekly} currency={group.currency} hasUser={!!currentUser} />
+        <WeeklySpendingChart expenses={expenses} currentUserId={currentUser?.id ?? null} currency={group.currency} hasUser={!!currentUser} />
       </section>
 
       <section>

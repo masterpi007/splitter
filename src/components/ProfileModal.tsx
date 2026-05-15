@@ -4,6 +4,7 @@ import { thumbs } from '@dicebear/collection';
 import type { Member } from '../types';
 import { BANKS } from '../constants/banks';
 import { PasskeyList } from './auth';
+import { deleteAccount } from '../api/client';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -11,9 +12,10 @@ interface ProfileModalProps {
   onClose: () => void;
   onSave: (updates: Partial<Member>) => Promise<void>;
   onLogout?: () => void;
+  onDeleteAccount?: () => void;
 }
 
-export function ProfileModal({ isOpen, currentUser, onClose, onSave, onLogout }: ProfileModalProps) {
+export function ProfileModal({ isOpen, currentUser, onClose, onSave, onLogout, onDeleteAccount }: ProfileModalProps) {
   const [name, setName] = useState('');
   const [avatarSeed, setAvatarSeed] = useState('');
   const [bankId, setBankId] = useState('');
@@ -69,6 +71,20 @@ export function ProfileModal({ isOpen, currentUser, onClose, onSave, onLogout }:
 
   const handleAccountNoChange = (value: string) => {
     setAccountNo(value.replace(/\D/g, ''));
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!confirm('Permanently delete your account? This cannot be undone.')) return;
+    setLoading(true);
+    setError('');
+    try {
+      await deleteAccount();
+      onDeleteAccount?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete account');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSave = async () => {
@@ -303,6 +319,13 @@ export function ProfileModal({ isOpen, currentUser, onClose, onSave, onLogout }:
               Sign Out
             </button>
           )}
+          <button
+            onClick={handleDeleteAccount}
+            disabled={loading}
+            className="cursor-pointer w-full px-4 py-2 text-red-600 hover:text-red-400 hover:bg-red-950/40 rounded-lg transition-colors text-xs"
+          >
+            Delete Account
+          </button>
         </div>
       </div>
     </div>

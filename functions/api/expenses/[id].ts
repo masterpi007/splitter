@@ -12,7 +12,7 @@ import {
   type Expense,
 } from '../utils/groups';
 import { notifyMembers as notifyPush } from '../utils/web-push';
-import { notifyMembers as notifyTelegram, sendDebouncedEditNotification } from '../utils/telegram';
+import { notifyMembers as notifyTelegram, sendDebouncedEditNotification, createCallbackData } from '../utils/telegram';
 
 // Fields that rewrite the "truth" of an expense (amount, attribution). Only
 // the original creator or a group admin can change these; anyone else can
@@ -75,7 +75,7 @@ async function sendEditNotification(
     await notifyPush(env, group, involvedIds, {
       title,
       body,
-      url: action === 'removed' ? '/expenses' : `/edit/${expense.id}`,
+      url: action === 'removed' ? '/expenses' : `/tx/${expense.id}`,
       tag: `expense-${expense.id}`,
     }, action === 'removed' ? 'expenseDeleted' : 'expenseEdited');
   } catch (err) {
@@ -90,6 +90,7 @@ async function sendEditNotification(
         .map((s) => `  • ${getMemberName(group, s.memberId)}: ${formatAmount(s.amount, currency)}`)
         .join('\n');
       const userIds = memberIdsToUserIds(group, expense.splits.map((s) => s.memberId));
+      const cbSignoff = await createCallbackData(env, 'signoff', group.id, expense.id);
       await sendDebouncedEditNotification(
         expense.id,
         userIds,
@@ -98,7 +99,7 @@ async function sendEditNotification(
         env,
         {
           inline_keyboard: [
-            [{ text: '✅ Confirm again', callback_data: `signoff:${group.id}:${expense.id}` }],
+            [{ text: '✅ Confirm again', callback_data: cbSignoff }],
           ],
         },
       );
@@ -142,15 +143,18 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
       id: before.id,
       createdAt: before.createdAt,
     };
-    if (structuralFieldsChanged(before, merged) && !canEditExpenseStructurally(group, before, member)) {
+    const structural = structuralFieldsChanged(before, merged);
+    if (structural && !canEditExpenseStructurally(group, before, member)) {
       return Response.json(
         { success: false, error: 'Only the creator or a group admin can change this expense' },
         { status: 403 },
       );
     }
-    const validationError = validateExpenseInput(group, merged);
-    if (validationError) {
-      return Response.json({ success: false, error: validationError }, { status: 400 });
+    if (structural) {
+      const validationError = validateExpenseInput(group, merged);
+      if (validationError) {
+        return Response.json({ success: false, error: validationError }, { status: 400 });
+      }
     }
     expenses[index] = merged;
     const updatedExpense = merged;

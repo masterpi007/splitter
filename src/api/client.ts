@@ -302,6 +302,10 @@ export async function updateProfile(updates: Partial<Member>): Promise<Member> {
   });
 }
 
+export async function deleteAccount(): Promise<void> {
+  await fetchApi<{ deleted: boolean }>('/auth/account', { method: 'DELETE' });
+}
+
 // --- Notifications ---
 
 export async function getNotifications(): Promise<NotificationRecord[]> {

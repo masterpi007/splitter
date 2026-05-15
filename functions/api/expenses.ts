@@ -10,7 +10,7 @@ import {
   type Expense,
 } from './utils/groups';
 import { notifyMembers as notifyPush } from './utils/web-push';
-import { notifyMembers as notifyTelegram, sendTelegramNotification } from './utils/telegram';
+import { notifyMembers as notifyTelegram, sendTelegramNotification, createCallbackData } from './utils/telegram';
 
 function getMemberName(group: GroupRecord, id: string): string {
   return findMember(group, id)?.name ?? id;
@@ -57,7 +57,7 @@ async function sendExpenseNotification(
     await notifyPush(env, group, involvedIds, {
       title,
       body,
-      url: `/edit/${expense.id}`,
+      url: `/tx/${expense.id}`,
       tag: `expense-${expense.id}`,
     }, isSettlement ? 'settlementRequest' : (action === 'added' ? 'newExpense' : 'expenseEdited'));
   } catch (err) {
@@ -72,6 +72,8 @@ async function sendExpenseNotification(
         if (debtor?.userId) {
           const payerName = getMemberName(group, expense.paidBy);
           const recipientName = debtor.name;
+          const cbAccept = await createCallbackData(env, 'settle_accept', group.id, expense.id);
+          const cbReject = await createCallbackData(env, 'settle_reject', group.id, expense.id);
           await sendTelegramNotification(
             debtor.userId,
             'settlementRequest',
@@ -80,8 +82,8 @@ async function sendExpenseNotification(
             {
               inline_keyboard: [
                 [
-                  { text: '✅ Confirm receipt', callback_data: `settle_accept:${group.id}:${expense.id}` },
-                  { text: '❌ Reject', callback_data: `settle_reject:${group.id}:${expense.id}` },
+                  { text: '✅ Confirm receipt', callback_data: cbAccept },
+                  { text: '❌ Reject', callback_data: cbReject },
                 ],
               ],
             },
@@ -102,13 +104,11 @@ async function sendExpenseNotification(
       const userIds = memberIdsToUserIds(group, memberIds);
       const excludeUserId = findMember(group, creatorId)?.userId ?? '';
       // Group-mode doesn't require per-member sign-off, so omit the confirm button.
-      const replyMarkup = isGroupMode
-        ? undefined
-        : {
-            inline_keyboard: [
-              [{ text: '✅ Confirm', callback_data: `signoff:${group.id}:${expense.id}` }],
-            ],
-          };
+      let replyMarkup: { inline_keyboard: { text: string; callback_data: string }[][] } | undefined;
+      if (!isGroupMode) {
+        const cbSignoff = await createCallbackData(env, 'signoff', group.id, expense.id);
+        replyMarkup = { inline_keyboard: [[{ text: '✅ Confirm', callback_data: cbSignoff }]] };
+      }
       await notifyTelegram(
         userIds,
         excludeUserId,

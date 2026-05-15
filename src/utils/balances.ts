@@ -308,7 +308,7 @@ function ymdKey(d: Date): string {
 }
 
 export interface WeeklySpending {
-  weekStart: string; // YYYY-MM-DD of the Monday (local time)
+  weekStart: string; // YYYY-MM-DD of the period start
   groupTotal: number;
   userShare: number;
 }
@@ -356,6 +356,83 @@ export function calculateWeeklySpending(
     const key = ymdKey(d);
     const entry = map.get(key) || { groupTotal: 0, userShare: 0 };
     result.push({ weekStart: key, ...entry });
+  }
+  return result;
+}
+
+export function calculateDailySpending(
+  expenses: Expense[],
+  currentUserId: string | null
+): WeeklySpending[] {
+  const map = new Map<string, { groupTotal: number; userShare: number }>();
+
+  for (const expense of expenses) {
+    if (isDeleted(expense)) continue;
+    if (expense.splitType === 'settlement') continue;
+    const when = new Date(expense.receiptDate || expense.createdAt);
+    if (isNaN(when.getTime())) continue;
+    const key = ymdKey(when);
+    const entry = map.get(key) || { groupTotal: 0, userShare: 0 };
+    entry.groupTotal += expense.amount;
+    if (currentUserId) {
+      for (const split of expense.splits) {
+        if (split.memberId === currentUserId) entry.userShare += split.amount;
+      }
+    }
+    map.set(key, entry);
+  }
+
+  const keys = [...map.keys()].sort();
+  if (keys.length === 0) return [];
+
+  const [fy, fm, fd] = keys[0].split('-').map(Number);
+  const [ly, lm, ld] = keys[keys.length - 1].split('-').map(Number);
+  const first = new Date(fy, fm - 1, fd);
+  const last = new Date(ly, lm - 1, ld);
+
+  const result: WeeklySpending[] = [];
+  for (let d = new Date(first); d.getTime() <= last.getTime(); d.setDate(d.getDate() + 1)) {
+    const key = ymdKey(d);
+    result.push({ weekStart: key, ...(map.get(key) || { groupTotal: 0, userShare: 0 }) });
+  }
+  return result;
+}
+
+export function calculateMonthlySpending(
+  expenses: Expense[],
+  currentUserId: string | null
+): WeeklySpending[] {
+  const map = new Map<string, { groupTotal: number; userShare: number }>();
+
+  for (const expense of expenses) {
+    if (isDeleted(expense)) continue;
+    if (expense.splitType === 'settlement') continue;
+    const when = new Date(expense.receiptDate || expense.createdAt);
+    if (isNaN(when.getTime())) continue;
+    const key = `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}-01`;
+    const entry = map.get(key) || { groupTotal: 0, userShare: 0 };
+    entry.groupTotal += expense.amount;
+    if (currentUserId) {
+      for (const split of expense.splits) {
+        if (split.memberId === currentUserId) entry.userShare += split.amount;
+      }
+    }
+    map.set(key, entry);
+  }
+
+  const keys = [...map.keys()].sort();
+  if (keys.length === 0) return [];
+
+  const [fy, fm] = keys[0].split('-').map(Number);
+  const [ly, lm] = keys[keys.length - 1].split('-').map(Number);
+
+  const result: WeeklySpending[] = [];
+  let year = fy, month = fm;
+  while (year < ly || (year === ly && month <= lm)) {
+    const key = `${year}-${String(month).padStart(2, '0')}-01`;
+    result.push({ weekStart: key, ...(map.get(key) || { groupTotal: 0, userShare: 0 }) });
+    month++;
+    if (month > 12) { month = 1; year++; }
   }
   return result;
 }

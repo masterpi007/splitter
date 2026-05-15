@@ -74,7 +74,10 @@ export function EditExpense() {
   // other participants (the admin auto-accepts only their own row).
   const isPayer = !!(currentUser && expense && currentUser.id === expense.paidBy);
   const isCreator = !!(currentUser && expense && currentUser.id === expense.createdBy);
-  const isParticipant = !!(currentUser && expense && expense.items?.some(item => item.memberId === currentUser.id));
+  const isParticipant = !!(currentUser && expense && (
+    expense.items?.some(item => item.memberId === currentUser.id) ||
+    expense.splits?.some(s => s.memberId === currentUser.id)
+  ));
   const isAdmin = !!(currentUser && group?.admins.includes(currentUser.id));
   const canEdit = isPayer || isCreator || isParticipant || isAdmin;
   // Admin overrides the narrow creator/participant restrictions —

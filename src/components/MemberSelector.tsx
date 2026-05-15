@@ -88,6 +88,12 @@ export function MemberSelector() {
     setCurrentUser(null);
   };
 
+  const handleDeleteAccount = async () => {
+    await logout();
+    setCurrentUser(null);
+    setAuthFlow(null);
+  };
+
   const handleEditProfile = () => {
     setAuthFlow('edit-profile');
   };
@@ -150,6 +156,7 @@ export function MemberSelector() {
           onClose={handleCloseModal}
           onSave={handleProfileSave}
           onLogout={handleLogout}
+          onDeleteAccount={handleDeleteAccount}
         />
       </>
     );
