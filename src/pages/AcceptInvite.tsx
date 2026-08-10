@@ -164,6 +164,9 @@ export function AcceptInvite() {
     setPageError(null);
     try {
       await acceptPasskeyInvite(code, friendlyName || undefined);
+      // The app booted unauthenticated, so the group list is empty — refetch
+      // now that the session cookie is live (same as the group-invite path).
+      await Promise.all([refreshGroups(), refreshData()]);
       setSuccess('passkey');
       setTimeout(() => navigate('/'), 1500);
     } catch (err) {
@@ -177,6 +180,7 @@ export function AcceptInvite() {
     setPageError(null);
     try {
       await authenticate();
+      await Promise.all([refreshGroups(), refreshData()]);
       setSuccess('passkey');
       setTimeout(() => navigate('/'), 1500);
     } catch (err) {
