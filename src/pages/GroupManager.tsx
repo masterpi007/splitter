@@ -5,7 +5,7 @@ import { useAuthContext } from '../components/auth';
 import * as api from '../api/client';
 import { sanitizeDecimalInput } from '../utils/balances';
 import type { Group, GroupInvite, Member } from '../types';
-import type { FriendCandidate } from '../api/client';
+import type { FriendCandidate, PasskeyRecovery } from '../api/client';
 
 export function GroupManager() {
   const { id: routeGroupId } = useParams<{ id: string }>();
@@ -20,6 +20,8 @@ export function GroupManager() {
   const [friendsError, setFriendsError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Recovery links keyed by memberId, shown inline after a successful reset.
+  const [recoveries, setRecoveries] = useState<Record<string, PasskeyRecovery>>({});
 
   // Keep the URL and the active group in sync. If the URL id doesn't match
   // the current active group, switch — then the fetch in AppContext reloads
@@ -44,6 +46,9 @@ export function GroupManager() {
     );
   }, [group, session, groupMatchesRoute]);
   const isAdmin = !!currentMember && !!group?.admins.includes(currentMember.id) && groupMatchesRoute;
+  // App admins ("TA") can recover passkeys in any group they can view, even
+  // where they aren't a group admin. Group admins can recover within their group.
+  const canRecoverPasskeys = (isAdmin || !!session?.isAppAdmin) && groupMatchesRoute;
 
   useEffect(() => {
     if (!group || !currentMember) return;
@@ -154,6 +159,27 @@ export function GroupManager() {
     }
   };
 
+  const handleRecoverPasskey = async (member: Member) => {
+    if (
+      !confirm(
+        `Reset ${member.name}'s passkey?\n\nThis revokes their existing passkey(s) and creates a one-time recovery link. Send the link to ${member.name} — they open it to register a new passkey. Their membership and history are kept.`,
+      )
+    )
+      return;
+    const recovery = await wrap(`recover-${member.id}`, () =>
+      api.recoverMemberPasskey(member.id),
+    );
+    if (recovery) setRecoveries((prev) => ({ ...prev, [member.id]: recovery }));
+  };
+
+  const handleCopyRecoveryLink = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // ignore — user can select the text manually
+    }
+  };
+
   const handleAddFriend = async (friend: FriendCandidate) => {
     const updated = await wrap(`add-friend-${friend.userId}`, () =>
       api.addFriendToGroup(friend.userId),
@@ -232,8 +258,10 @@ export function GroupManager() {
           const memberIsAdmin = group.admins.includes(m.id);
           const lastAdmin = memberIsAdmin && group.admins.length <= 1;
           const isMe = m.id === currentMember.id;
+          const recovery = recoveries[m.id];
           return (
-            <div key={m.id} className="px-4 py-3 flex items-center gap-3 flex-wrap">
+            <div key={m.id}>
+              <div className="px-4 py-3 flex items-center gap-3 flex-wrap">
               {/* Share input leftmost → fixed-width first column so the share
                   columns line up vertically across all rows. `×` sits between
                   the input and the name as the "times" sign (rate × member). */}
@@ -276,6 +304,43 @@ export function GroupManager() {
                 >
                   Remove
                 </button>
+              )}
+              {canRecoverPasskeys && !isMe && !!m.userId && (
+                <button
+                  onClick={() => handleRecoverPasskey(m)}
+                  disabled={busy === `recover-${m.id}`}
+                  className="text-xs px-2 py-1 border border-amber-700 text-amber-300 rounded hover:bg-amber-900/30 disabled:opacity-50"
+                  title="Revoke this member's passkey and issue a recovery link"
+                >
+                  {busy === `recover-${m.id}` ? 'Resetting…' : 'Reset passkey'}
+                </button>
+              )}
+              </div>
+              {recovery && (
+                <div className="px-4 pb-3 -mt-1">
+                  <div className="p-3 bg-amber-900/20 border border-amber-800 rounded-lg">
+                    <p className="text-xs text-amber-200 mb-2">
+                      Recovery link for <span className="font-medium">{recovery.memberName}</span>
+                      {recovery.revokedExisting && ' — old passkeys revoked'}. Expires{' '}
+                      {new Date(recovery.expiresAt).toLocaleDateString()}. Share privately: anyone
+                      with this link can sign in as {recovery.memberName}.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <p
+                        className="flex-1 text-xs text-gray-300 font-mono truncate"
+                        title={recovery.inviteUrl}
+                      >
+                        {recovery.inviteUrl}
+                      </p>
+                      <button
+                        onClick={() => handleCopyRecoveryLink(recovery.inviteUrl)}
+                        className="text-xs px-2 py-1 border border-gray-600 rounded hover:bg-gray-700"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           );

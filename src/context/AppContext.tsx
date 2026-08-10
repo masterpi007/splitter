@@ -28,7 +28,7 @@ interface AppContextType {
   error: string | null;
   setActiveGroup: (groupId: string) => void;
   setCurrentUser: (user: Member | null) => void;
-  refreshData: () => Promise<void>;
+  refreshData: (opts?: { silent?: boolean }) => Promise<void>;
   refreshGroups: () => Promise<void>;
   addMember: (name: string) => Promise<Member | null>;
   removeMember: (id: string) => Promise<void>;
@@ -118,7 +118,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // visibilitychange, retry) would silently splice stale data in.
   const refreshTargetRef = useRef<string | null>(getActiveGroupId());
 
-  const refreshData = useCallback(async () => {
+  const refreshData = useCallback(async (opts?: { silent?: boolean }) => {
+    // Silent refreshes (returning to the tab, SW broadcast) must NOT flip the
+    // global `loading` flag: Layout unmounts the whole route tree while loading
+    // is true, which would wipe any in-progress form (e.g. AddExpense inputs).
+    // The flag exists for first paint, where there's nothing on screen yet.
+    const silent = opts?.silent === true;
     const targetGroupId = getActiveGroupId();
     refreshTargetRef.current = targetGroupId;
     if (!targetGroupId) {
@@ -127,7 +132,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     // Settle independently so a 401 on expenses (unauthenticated caller)
     // doesn't block the group from loading. The legacy group is readable
     // without a session for the self-registration bootstrap, but expenses
@@ -138,7 +143,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       api.getExpenses(targetGroupId),
     ]);
     if (refreshTargetRef.current !== targetGroupId) {
-      setLoading(false);
+      if (!silent) setLoading(false);
       return;
     }
 
@@ -166,7 +171,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } else {
       setError(firstError instanceof Error ? firstError.message : 'Failed to fetch data');
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, []);
 
   const addMember = useCallback(
@@ -299,7 +304,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!navigator.serviceWorker) return;
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'REFRESH_DATA') {
-        refreshData();
+        refreshData({ silent: true });
       }
     };
     navigator.serviceWorker.addEventListener('message', handleMessage);
@@ -310,7 +315,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        refreshData();
+        refreshData({ silent: true });
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);

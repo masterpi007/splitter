@@ -5,6 +5,7 @@ import {
   deleteSession,
   clearAuthCookie,
 } from '../utils/jwt';
+import { isAppAdmin } from '../utils/admin';
 
 // GET /api/auth/session - Check current session
 export const onRequestGet: PagesFunction<AuthEnv> = async (context) => {
@@ -44,6 +45,7 @@ export const onRequestGet: PagesFunction<AuthEnv> = async (context) => {
           userId: session.userId,
           userName: session.userName,
           expiresAt: session.expiresAt,
+          isAppAdmin: isAppAdmin(context.env, session.userId),
         },
       },
     });

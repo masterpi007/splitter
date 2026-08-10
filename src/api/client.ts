@@ -121,6 +121,29 @@ export async function updateAdmin(memberId: string, admin: boolean): Promise<Gro
   });
 }
 
+// Admin (group admin or app admin) issues a passkey-recovery link for a member
+// who lost their passkey. By default revokes the member's existing passkeys.
+export interface PasskeyRecovery {
+  inviteCode: string;
+  inviteUrl: string;
+  expiresAt: string;
+  memberName: string;
+  revokedExisting: boolean;
+}
+
+export async function recoverMemberPasskey(
+  memberId: string,
+  opts?: { revokeExisting?: boolean },
+): Promise<PasskeyRecovery> {
+  return fetchApi<PasskeyRecovery>(
+    `/groups/members/${encodeURIComponent(memberId)}/recover-passkey`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ revokeExisting: opts?.revokeExisting ?? true }),
+    },
+  );
+}
+
 // --- Friends (direct-add candidates) ---
 
 export interface FriendCandidate {

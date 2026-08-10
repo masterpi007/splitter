@@ -19,5 +19,9 @@ RP_ORIGIN = "https://split.helios-stake.org"
 VAPID_PUBLIC_KEY = "BGk9DjrVqgTy7XjrVKRGEBVEIOxn1tXfMwQeIduK6xoY1xKxgjXdqfK_nftr9D4FfMouID5SdPcWPpsirn8hO2E"
 VAPID_SUBJECT = "mailto:admin@split.helios-stake.org"
 
+# App-wide admins (comma-separated userIds). Grants cross-group privileges such
+# as recovering any member's passkey. Currently: "TA".
+APP_ADMIN_USER_IDS = "146580ad-5c20-4f0b-9c35-ffd3b6180340"
+
 [ai]
 binding = "AI"

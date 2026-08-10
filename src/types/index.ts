@@ -160,6 +160,9 @@ export interface SessionInfo {
   userId: string;
   userName: string;
   expiresAt: string;
+  // True when this user is an app-wide admin (APP_ADMIN_USER_IDS). Only
+  // populated by GET /api/auth/session; undefined on freshly minted sessions.
+  isAppAdmin?: boolean;
 }
 
 export interface AuthState {

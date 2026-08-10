@@ -15,6 +15,9 @@ export interface AuthEnv {
   VAPID_SUBJECT: string;
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_WEBHOOK_SECRET: string;
+  // Comma-separated list of userIds with app-wide admin rights (e.g. passkey
+  // recovery for any member of any group). Absent/empty ⇒ no app admins.
+  APP_ADMIN_USER_IDS?: string;
 }
 
 // Stored WebAuthn credential for a user
