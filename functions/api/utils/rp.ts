@@ -7,7 +7,7 @@ export function getRp(request: Request, env: Pick<AuthEnv, 'RP_ID' | 'RP_NAME' |
   const url = new URL(request.url);
   return {
     rpID: env.RP_ID || url.hostname,
-    rpName: env.RP_NAME || 'Splitter',
+    rpName: env.RP_NAME || 'Chia',
     origin: env.RP_ORIGIN || url.origin,
   };
 }

@@ -11,7 +11,7 @@ export function Dashboard() {
       <div className="max-w-md mx-auto mt-8">
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 text-center space-y-3">
           <h2 className="text-lg font-semibold text-gray-100">No active group</h2>
-          <p className="text-sm text-gray-400">Sign in, then create or join a group to start using Splitter.</p>
+          <p className="text-sm text-gray-400">Sign in, then create or join a group to start using Chia.</p>
           <Link
             to="/groups"
             className="inline-block px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-sm font-medium"

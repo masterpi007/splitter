@@ -30,7 +30,7 @@ self.addEventListener('push', (event) => {
 
   event.waitUntil(
     Promise.all([
-      self.registration.showNotification(data.title || 'Split', options),
+      self.registration.showNotification(data.title || 'Chia', options),
       // Tell all open tabs to refresh their data
       self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
         clients.forEach((client) => client.postMessage({ type: 'REFRESH_DATA' }));

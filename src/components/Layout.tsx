@@ -31,7 +31,7 @@ export function Layout({ children }: LayoutProps) {
   // simpler than history-based nav, which gets confusing when users land
   // deep via an invite link. Disabled on /groups itself (already there).
   const onGroupsScreen = location.pathname === '/groups';
-  const headerTitle = onGroupsScreen ? 'Groups' : (group?.name ?? 'Split');
+  const headerTitle = onGroupsScreen ? 'Groups' : (group?.name ?? 'Chia');
 
   const handleBack = () => {
     navigate('/groups');
