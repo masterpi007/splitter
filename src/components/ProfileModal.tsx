@@ -15,6 +15,50 @@ interface ProfileModalProps {
   onDeleteAccount?: () => void;
 }
 
+interface ProfileFields {
+  name: string;
+  avatarSeed: string;
+  bankId: string;
+  accountName: string;
+  accountNo: string;
+}
+
+// Compute the autosave payload from the form fields. Returns updates:null
+// when nothing may be saved (no name); a non-empty hint flags soft issues
+// (e.g. bank triple incomplete — name/avatar still save, bank part waits).
+function buildProfileUpdates(f: ProfileFields): { updates: Partial<Member> | null; hint: string } {
+  const trimmedName = f.name.trim();
+  if (!trimmedName) return { updates: null, hint: 'Name is required' };
+  const updates: Partial<Member> = { name: trimmedName, avatarSeed: f.avatarSeed || trimmedName };
+  const bankId = f.bankId.trim();
+  const accountName = f.accountName.trim();
+  const accountNo = f.accountNo.trim();
+  const filled = [bankId, accountName, accountNo].filter(Boolean).length;
+  if (filled === 0) {
+    // All cleared — blank out stored bank details. The server merges
+    // per-field and drops absent keys, so clearing must send '' explicitly.
+    updates.bankId = '';
+    updates.bankName = '';
+    updates.bankShortName = '';
+    updates.accountName = '';
+    updates.accountNo = '';
+    return { updates, hint: '' };
+  }
+  const selectedBank = BANKS.find((b) => b.id === bankId);
+  if (filled < 3 || !selectedBank) {
+    return { updates, hint: 'Bank details save once all three fields are set' };
+  }
+  if (!/^[0-9]{6,20}$/.test(accountNo)) {
+    return { updates, hint: 'Account number must be 6-20 digits' };
+  }
+  updates.bankId = bankId;
+  updates.bankName = selectedBank.name;
+  updates.bankShortName = selectedBank.shortName;
+  updates.accountName = accountName;
+  updates.accountNo = accountNo;
+  return { updates, hint: '' };
+}
+
 export function ProfileModal({ isOpen, currentUser, onClose, onSave, onLogout, onDeleteAccount }: ProfileModalProps) {
   const [name, setName] = useState('');
   const [avatarSeed, setAvatarSeed] = useState('');
@@ -23,8 +67,13 @@ export function ProfileModal({ isOpen, currentUser, onClose, onSave, onLogout, o
   const [accountNo, setAccountNo] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [hint, setHint] = useState('');
   const [bankDropdownOpen, setBankDropdownOpen] = useState(false);
   const bankDropdownRef = useRef<HTMLDivElement>(null);
+  // Payload of the last successful (or initial) save — autosave skips when
+  // the effective payload hasn't changed.
+  const lastSavedPayload = useRef<string>('');
 
   useEffect(() => {
     if (!bankDropdownOpen) return;
@@ -39,18 +88,34 @@ export function ProfileModal({ isOpen, currentUser, onClose, onSave, onLogout, o
 
   useEffect(() => {
     if (isOpen && currentUser) {
-      setName(currentUser.name);
-      setAvatarSeed(currentUser.avatarSeed || currentUser.name);
-      setBankId(currentUser.bankId || '');
-      setAccountName(currentUser.accountName || '');
-      setAccountNo(currentUser.accountNo || '');
+      const fields = {
+        name: currentUser.name,
+        avatarSeed: currentUser.avatarSeed || currentUser.name,
+        bankId: currentUser.bankId || '',
+        accountName: currentUser.accountName || '',
+        accountNo: currentUser.accountNo || '',
+      };
+      setName(fields.name);
+      setAvatarSeed(fields.avatarSeed);
+      setBankId(fields.bankId);
+      setAccountName(fields.accountName);
+      setAccountNo(fields.accountNo);
       setError('');
+      setHint('');
+      setSaveState('idle');
+      lastSavedPayload.current = JSON.stringify(buildProfileUpdates(fields).updates);
     }
-  }, [isOpen, currentUser]);
+    // Populate only on open. Re-running on currentUser changes would stomp
+    // in-progress edits when our own autosave round-trips through the parent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) onClose();
+      if (e.key === 'Escape' && isOpen) {
+        void doSaveRef.current();
+        onClose();
+      }
     };
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
@@ -62,7 +127,7 @@ export function ProfileModal({ isOpen, currentUser, onClose, onSave, onLogout, o
   }, [isOpen]);
 
   const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onClose();
+    if (e.target === e.currentTarget) handleClose();
   };
 
   const handleAccountNameChange = (value: string) => {
@@ -87,45 +152,38 @@ export function ProfileModal({ isOpen, currentUser, onClose, onSave, onLogout, o
     }
   };
 
-  const handleSave = async () => {
+  const doSave = async () => {
+    const { updates, hint: nextHint } = buildProfileUpdates({ name, avatarSeed, bankId, accountName, accountNo });
+    setHint(nextHint);
+    if (!updates) return;
+    const payload = JSON.stringify(updates);
+    if (payload === lastSavedPayload.current) return;
+    setSaveState('saving');
     setError('');
-    if (!name.trim()) { setError('Name is required'); return; }
-
-    const hasBankId = bankId.trim() !== '';
-    const hasAccountName = accountName.trim() !== '';
-    const hasAccountNo = accountNo.trim() !== '';
-    const bankFieldsCount = [hasBankId, hasAccountName, hasAccountNo].filter(Boolean).length;
-    if (bankFieldsCount > 0 && bankFieldsCount < 3) {
-      setError('Please fill in all bank account fields or leave them all empty');
-      return;
-    }
-
-    setLoading(true);
     try {
-      const updates: Partial<Member> = { name: name.trim(), avatarSeed: avatarSeed || name.trim() };
-      if (hasBankId && hasAccountName && hasAccountNo) {
-        const selectedBank = BANKS.find(b => b.id === bankId);
-        if (selectedBank) {
-          updates.bankId = bankId;
-          updates.bankName = selectedBank.name;
-          updates.bankShortName = selectedBank.shortName;
-          updates.accountName = accountName.trim();
-          updates.accountNo = accountNo.trim();
-        }
-      } else {
-        updates.bankId = undefined;
-        updates.bankName = undefined;
-        updates.bankShortName = undefined;
-        updates.accountName = undefined;
-        updates.accountNo = undefined;
-      }
       await onSave(updates);
-      onClose();
+      lastSavedPayload.current = payload;
+      setSaveState('saved');
     } catch (err) {
+      setSaveState('error');
       setError(err instanceof Error ? err.message : 'Failed to update profile');
-    } finally {
-      setLoading(false);
     }
+  };
+  const doSaveRef = useRef(doSave);
+  doSaveRef.current = doSave;
+
+  // Autosave after a pause in edits. The payload comparison in doSave keeps
+  // the initial population (and no-op edits) from hitting the API.
+  useEffect(() => {
+    if (!isOpen || !currentUser) return;
+    const t = setTimeout(() => { void doSaveRef.current(); }, 800);
+    return () => clearTimeout(t);
+  }, [isOpen, currentUser, name, avatarSeed, bankId, accountName, accountNo]);
+
+  const handleClose = () => {
+    // Flush any pending edit; fire-and-forget so closing is never blocked.
+    void doSaveRef.current();
+    onClose();
   };
 
   if (!isOpen) return null;
@@ -173,7 +231,7 @@ export function ProfileModal({ isOpen, currentUser, onClose, onSave, onLogout, o
               {shortHash && <p className="text-xs text-gray-500">#{shortHash}</p>}
             </div>
           </div>
-          <button onClick={onClose} className="cursor-pointer text-gray-400 hover:text-white transition-colors" aria-label="Close">
+          <button onClick={handleClose} className="cursor-pointer text-gray-400 hover:text-white transition-colors" aria-label="Close">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -303,13 +361,15 @@ export function ProfileModal({ isOpen, currentUser, onClose, onSave, onLogout, o
 
         {/* Footer */}
         <div className={`flex flex-col gap-2 px-6 py-4 ${sh}:py-3 border-t border-gray-700 shrink-0`}>
-          <button
-            onClick={handleSave}
-            disabled={loading}
-            className="cursor-pointer w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg transition-colors"
-          >
-            {loading ? 'Saving...' : 'Save'}
-          </button>
+          <div className="h-5 flex items-center justify-center text-xs" aria-live="polite">
+            {hint ? (
+              <span className="text-amber-400">{hint}</span>
+            ) : saveState === 'saving' ? (
+              <span className="text-gray-400">Saving…</span>
+            ) : saveState === 'saved' ? (
+              <span className="text-green-400">Saved ✓</span>
+            ) : null}
+          </div>
           {onLogout && (
             <button
               onClick={onLogout}
