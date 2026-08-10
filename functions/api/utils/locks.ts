@@ -17,6 +17,22 @@ export interface LockHandle {
 // Try to acquire `key`. Returns null when the lock is already held (caller
 // should return a retry-safe response). Release with `handle.release()` in a
 // finally block; the TTL guarantees stuck locks time out on their own.
+// acquireLock with a few backoff retries — for short critical sections where
+// brief contention (e.g. sequential accept-all sign-offs from one client,
+// two members editing at once) should wait rather than fail.
+export async function acquireLockWithRetry(
+  env: AuthEnv,
+  key: string,
+  attempts = 5,
+): Promise<LockHandle | null> {
+  for (let i = 0; i < attempts; i++) {
+    const lock = await acquireLock(env, key);
+    if (lock) return lock;
+    await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+  }
+  return null;
+}
+
 export async function acquireLock(env: AuthEnv, key: string): Promise<LockHandle | null> {
   const fullKey = `lock::${key}`;
   const existing = await env.SPLITTER_KV.get(fullKey);

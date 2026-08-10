@@ -13,6 +13,7 @@ import {
 } from '../utils/groups';
 import { notifyMembers as notifyPush } from '../utils/web-push';
 import { notifyMembers as notifyTelegram, sendDebouncedEditNotification, createCallbackData } from '../utils/telegram';
+import { acquireLockWithRetry } from '../utils/locks';
 
 // Fields that rewrite the "truth" of an expense (amount, attribution). Only
 // the original creator or a group admin can change these; anyone else can
@@ -126,46 +127,61 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
 
     const id = context.params.id as string;
     const updates = (await context.request.json()) as Partial<Expense>;
-    const expenses = (await getExpenses(context.env, group.id)) as Expense[];
 
-    const index = expenses.findIndex((e) => e.id === id);
-    if (index === -1) {
+    // The whole group's expenses live in one KV record; serialize the
+    // read-modify-write or concurrent updates (e.g. several members signing
+    // off at once) silently overwrite each other.
+    const lock = await acquireLockWithRetry(context.env, `expenses::${group.id}`);
+    if (!lock) {
       return Response.json(
-        { success: false, error: 'Expense not found' },
-        { status: 404 },
+        { success: false, error: 'Another update is in progress — please retry' },
+        { status: 409 },
       );
     }
+    try {
+      const expenses = (await getExpenses(context.env, group.id)) as Expense[];
 
-    const before = expenses[index];
-    const merged: Expense = {
-      ...before,
-      ...updates,
-      id: before.id,
-      createdAt: before.createdAt,
-    };
-    const structural = structuralFieldsChanged(before, merged);
-    if (structural && !canEditExpenseStructurally(group, before, member)) {
-      return Response.json(
-        { success: false, error: 'Only the creator or a group admin can change this expense' },
-        { status: 403 },
-      );
-    }
-    if (structural) {
-      const validationError = validateExpenseInput(group, merged);
-      if (validationError) {
-        return Response.json({ success: false, error: validationError }, { status: 400 });
+      const index = expenses.findIndex((e) => e.id === id);
+      if (index === -1) {
+        return Response.json(
+          { success: false, error: 'Expense not found' },
+          { status: 404 },
+        );
       }
+
+      const before = expenses[index];
+      const merged: Expense = {
+        ...before,
+        ...updates,
+        id: before.id,
+        createdAt: before.createdAt,
+      };
+      const structural = structuralFieldsChanged(before, merged);
+      if (structural && !canEditExpenseStructurally(group, before, member)) {
+        return Response.json(
+          { success: false, error: 'Only the creator or a group admin can change this expense' },
+          { status: 403 },
+        );
+      }
+      if (structural) {
+        const validationError = validateExpenseInput(group, merged);
+        if (validationError) {
+          return Response.json({ success: false, error: validationError }, { status: 400 });
+        }
+      }
+      expenses[index] = merged;
+      const updatedExpense = merged;
+      await saveExpenses(context.env, group.id, expenses);
+
+      const isDeleted = updatedExpense.tags?.includes('deleted');
+      context.waitUntil(
+        sendEditNotification(context.env, group, updatedExpense, member.id, isDeleted ? 'removed' : 'updated'),
+      );
+
+      return Response.json({ success: true, data: updatedExpense });
+    } finally {
+      await lock.release();
     }
-    expenses[index] = merged;
-    const updatedExpense = merged;
-    await saveExpenses(context.env, group.id, expenses);
-
-    const isDeleted = updatedExpense.tags?.includes('deleted');
-    context.waitUntil(
-      sendEditNotification(context.env, group, updatedExpense, member.id, isDeleted ? 'removed' : 'updated'),
-    );
-
-    return Response.json({ success: true, data: updatedExpense });
   } catch (error) {
     return Response.json(
       { success: false, error: 'Failed to update expense' },
@@ -181,29 +197,41 @@ export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
     const { group, member } = ctx;
 
     const id = context.params.id as string;
-    const expenses = (await getExpenses(context.env, group.id)) as Expense[];
 
-    const index = expenses.findIndex((e) => e.id === id);
-    if (index === -1) {
+    const lock = await acquireLockWithRetry(context.env, `expenses::${group.id}`);
+    if (!lock) {
       return Response.json(
-        { success: false, error: 'Expense not found' },
-        { status: 404 },
+        { success: false, error: 'Another update is in progress — please retry' },
+        { status: 409 },
       );
     }
+    try {
+      const expenses = (await getExpenses(context.env, group.id)) as Expense[];
 
-    const deletedExpense = expenses[index];
-    if (!canEditExpenseStructurally(group, deletedExpense, member)) {
-      return Response.json(
-        { success: false, error: 'Only the creator or a group admin can delete this expense' },
-        { status: 403 },
-      );
+      const index = expenses.findIndex((e) => e.id === id);
+      if (index === -1) {
+        return Response.json(
+          { success: false, error: 'Expense not found' },
+          { status: 404 },
+        );
+      }
+
+      const deletedExpense = expenses[index];
+      if (!canEditExpenseStructurally(group, deletedExpense, member)) {
+        return Response.json(
+          { success: false, error: 'Only the creator or a group admin can delete this expense' },
+          { status: 403 },
+        );
+      }
+      expenses.splice(index, 1);
+      await saveExpenses(context.env, group.id, expenses);
+
+      context.waitUntil(sendEditNotification(context.env, group, deletedExpense, member.id, 'removed'));
+
+      return Response.json({ success: true });
+    } finally {
+      await lock.release();
     }
-    expenses.splice(index, 1);
-    await saveExpenses(context.env, group.id, expenses);
-
-    context.waitUntil(sendEditNotification(context.env, group, deletedExpense, member.id, 'removed'));
-
-    return Response.json({ success: true });
   } catch (error) {
     return Response.json(
       { success: false, error: 'Failed to delete expense' },

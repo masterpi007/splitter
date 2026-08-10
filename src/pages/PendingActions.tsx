@@ -106,11 +106,20 @@ export function PendingActions() {
               onClick={async () => {
                 setSigningAll(true);
                 try {
-                  const results = await Promise.allSettled(toSignOff.map((expense) => signOffExpense(expense)));
-                  const failed = results.filter(r => r.status === 'rejected').length;
+                  // Sequential on purpose: the server stores all group
+                  // expenses in one KV record, so parallel sign-offs
+                  // overwrite each other (last write wins).
+                  let failed = 0;
+                  for (const expense of toSignOff) {
+                    try {
+                      await signOffExpense(expense);
+                    } catch {
+                      failed++;
+                    }
+                  }
                   if (failed > 0) {
                     // Some succeeded, some failed — UI will refresh from context
-                    console.warn(`${failed} of ${results.length} sign-offs failed`);
+                    console.warn(`${failed} of ${toSignOff.length} sign-offs failed`);
                   }
                 } finally {
                   setSigningAll(false);

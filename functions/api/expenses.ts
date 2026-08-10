@@ -11,6 +11,7 @@ import {
 } from './utils/groups';
 import { notifyMembers as notifyPush } from './utils/web-push';
 import { notifyMembers as notifyTelegram, sendTelegramNotification, createCallbackData } from './utils/telegram';
+import { acquireLockWithRetry } from './utils/locks';
 
 function getMemberName(group: GroupRecord, id: string): string {
   return findMember(group, id)?.name ?? id;
@@ -149,20 +150,33 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
       return Response.json({ success: false, error: validationError }, { status: 400 });
     }
 
-    const expenses = (await getExpenses(context.env, group.id)) as Expense[];
+    // Same one-record-per-group storage as PUT/DELETE — serialize appends so
+    // a create landing during other writes isn't lost.
+    const lock = await acquireLockWithRetry(context.env, `expenses::${group.id}`);
+    if (!lock) {
+      return Response.json(
+        { success: false, error: 'Another update is in progress — please retry' },
+        { status: 409 },
+      );
+    }
+    try {
+      const expenses = (await getExpenses(context.env, group.id)) as Expense[];
 
-    const newExpense: Expense = {
-      ...expense,
-      createdBy: expense.createdBy ?? member.id,
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-    };
-    expenses.push(newExpense);
-    await saveExpenses(context.env, group.id, expenses);
+      const newExpense: Expense = {
+        ...expense,
+        createdBy: expense.createdBy ?? member.id,
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+      };
+      expenses.push(newExpense);
+      await saveExpenses(context.env, group.id, expenses);
 
-    context.waitUntil(sendExpenseNotification(context.env, group, newExpense, 'added'));
+      context.waitUntil(sendExpenseNotification(context.env, group, newExpense, 'added'));
 
-    return Response.json({ success: true, data: newExpense });
+      return Response.json({ success: true, data: newExpense });
+    } finally {
+      await lock.release();
+    }
   } catch (error) {
     return Response.json(
       { success: false, error: 'Failed to create expense' },
