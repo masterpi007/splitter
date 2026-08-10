@@ -2,6 +2,7 @@ import { generateRegistrationOptions } from '@simplewebauthn/server';
 import type { AuthEnv, RegisterOptionsRequest } from '../../types/auth';
 import { storeChallenge } from '../../utils/challenges';
 import { getCredentials } from '../../utils/credentials';
+import { getRp } from '../../utils/rp';
 
 export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
   try {
@@ -19,9 +20,10 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     // Get existing credentials to exclude them from registration
     const existingCredentials = await getCredentials(env, memberId);
 
+    const { rpID, rpName } = getRp(context.request, env);
     const options = await generateRegistrationOptions({
-      rpName: env.RP_NAME || 'Split',
-      rpID: env.RP_ID || 'localhost',
+      rpName,
+      rpID,
       userName: memberName,
       userID: new TextEncoder().encode(memberId),
       userDisplayName: memberName,

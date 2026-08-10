@@ -6,18 +6,17 @@ pages_build_output_dir = "dist"
 binding = "SPLITTER_KV"
 id = "d39351a8dc64417c879863e174de9c8b"
 
-[vars]
-# For production, set these via Cloudflare dashboard or `wrangler secret put`:
-# - JWT_SECRET: A secure random string (at least 32 characters)
-# - RP_ID: Your production domain (e.g., "splitter.example.com")
-# - RP_ORIGIN: Your production URL (e.g., "https://splitter.example.com")
+# WebAuthn RP identity (rpID/origin/name) is derived from the request URL —
+# see functions/api/utils/rp.ts — so no RP_* vars are needed here.
+# Secrets live in the dashboard (Pages → Settings → Variables and Secrets)
+# or `wrangler pages secret put`:
+# - JWT_SECRET: random string ≥32 chars, signs session cookies
+# - VAPID_PRIVATE_KEY: pairs with VAPID_PUBLIC_KEY below
+# - TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET: only if the Telegram bot is used
 
-# Development values (safe to commit)
-RP_ID = "split.helios-stake.org"
-RP_NAME = "Splitter"
-RP_ORIGIN = "https://split.helios-stake.org"
+[vars]
 VAPID_PUBLIC_KEY = "BGk9DjrVqgTy7XjrVKRGEBVEIOxn1tXfMwQeIduK6xoY1xKxgjXdqfK_nftr9D4FfMouID5SdPcWPpsirn8hO2E"
-VAPID_SUBJECT = "mailto:admin@split.helios-stake.org"
+VAPID_SUBJECT = "mailto:admin@split.masterpi.me"
 
 # App-wide admins (comma-separated userIds). Grants cross-group privileges such
 # as recovering any member's passkey. Currently: "TA".

@@ -7,9 +7,11 @@ import type {
 export interface AuthEnv {
   SPLITTER_KV: KVNamespace;
   JWT_SECRET: string;
-  RP_ID: string;
-  RP_NAME: string;
-  RP_ORIGIN: string;
+  // WebAuthn Relying Party overrides. Absent ⇒ derived from the request URL
+  // (see utils/rp.ts), which is correct for a single-domain deployment.
+  RP_ID?: string;
+  RP_NAME?: string;
+  RP_ORIGIN?: string;
   VAPID_PUBLIC_KEY: string;
   VAPID_PRIVATE_KEY: string;
   VAPID_SUBJECT: string;

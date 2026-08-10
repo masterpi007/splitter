@@ -3,6 +3,7 @@ import type { AuthEnv, StoredCredential } from '../../types/auth';
 import { getTokenFromCookies, verifySession } from '../../utils/jwt';
 import { consumeChallenge } from '../../utils/challenges';
 import { addCredential } from '../../utils/credentials';
+import { getRp } from '../../utils/rp';
 
 interface LinkPasskeyVerifyRequest {
   credential: {
@@ -56,9 +57,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
       );
     }
 
-    // Determine origin from request or env
-    const origin = env.RP_ORIGIN || new URL(context.request.url).origin;
-    const rpID = env.RP_ID || 'localhost';
+    const { rpID, origin } = getRp(context.request, env);
 
     // Verify the registration response
     const verification = await verifyRegistrationResponse({

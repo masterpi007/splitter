@@ -8,6 +8,7 @@ import {
 } from '../../utils/credentials';
 import { createSession, createAuthCookie } from '../../utils/jwt';
 import { getUser } from '../../utils/users';
+import { getRp } from '../../utils/rp';
 
 export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
   try {
@@ -47,8 +48,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
       );
     }
 
-    const origin = env.RP_ORIGIN || new URL(context.request.url).origin;
-    const rpID = env.RP_ID || 'localhost';
+    const { rpID, origin } = getRp(context.request, env);
 
     const verification = await verifyAuthenticationResponse({
       response: credential,

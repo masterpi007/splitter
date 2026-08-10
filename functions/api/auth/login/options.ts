@@ -1,6 +1,7 @@
 import { generateAuthenticationOptions } from '@simplewebauthn/server';
 import type { AuthEnv } from '../../types/auth';
 import { storeChallenge } from '../../utils/challenges';
+import { getRp } from '../../utils/rp';
 
 export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
   try {
@@ -9,7 +10,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     // Generate authentication options for discoverable credentials
     // No allowCredentials = browser will show all available passkeys for this RP
     const options = await generateAuthenticationOptions({
-      rpID: env.RP_ID || 'localhost',
+      rpID: getRp(context.request, env).rpID,
       userVerification: 'preferred',
       // Empty allowCredentials for discoverable credential flow
     });

@@ -11,6 +11,7 @@ import {
 } from '../../utils/groups';
 import { createUser, addMembership } from '../../utils/users';
 import { getInvite } from '../../utils/invites';
+import { getRp } from '../../utils/rp';
 
 // Register a brand-new User and attach them to a group. Two target-group
 // modes:
@@ -80,8 +81,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
       );
     }
 
-    const origin = env.RP_ORIGIN || new URL(context.request.url).origin;
-    const rpID = env.RP_ID || 'localhost';
+    const { rpID, origin } = getRp(context.request, env);
 
     const verification = await verifyRegistrationResponse({
       response: credential,

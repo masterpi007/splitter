@@ -2,6 +2,7 @@ import { generateRegistrationOptions } from '@simplewebauthn/server';
 import type { AuthEnv, PasskeyInvite, StoredChallenge } from '../../../types/auth';
 import { KV_KEYS, CHALLENGE_TTL_SECONDS } from '../../../types/auth';
 import { getCredentials } from '../../../utils/credentials';
+import { getRp } from '../../../utils/rp';
 
 interface InviteOptionsRequest {
   inviteCode: string;
@@ -47,9 +48,10 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
 
     const existingCredentials = await getCredentials(env, userId);
 
+    const { rpID, rpName } = getRp(context.request, env);
     const options = await generateRegistrationOptions({
-      rpName: env.RP_NAME || 'Split',
-      rpID: env.RP_ID || 'localhost',
+      rpName,
+      rpID,
       userName,
       userID: new TextEncoder().encode(userId),
       userDisplayName: userName,

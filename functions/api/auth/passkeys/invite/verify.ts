@@ -3,6 +3,7 @@ import type { AuthEnv, PasskeyInvite, StoredChallenge, StoredCredential } from '
 import { KV_KEYS } from '../../../types/auth';
 import { addCredential } from '../../../utils/credentials';
 import { createSession, createAuthCookie } from '../../../utils/jwt';
+import { getRp } from '../../../utils/rp';
 
 interface InviteVerifyRequest {
   inviteCode: string;
@@ -75,9 +76,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
       );
     }
 
-    // Determine origin from request or env
-    const origin = env.RP_ORIGIN || new URL(context.request.url).origin;
-    const rpID = env.RP_ID || 'localhost';
+    const { rpID, origin } = getRp(context.request, env);
 
     // Verify the registration response
     const verification = await verifyRegistrationResponse({
