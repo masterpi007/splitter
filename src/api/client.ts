@@ -44,6 +44,9 @@ async function fetchApi<T>(
   const { groupId, ...init } = options ?? {};
   const activeGroupId = groupId ?? getActiveGroupId();
   const response = await fetch(`${API_BASE}${endpoint}`, {
+    // Belt to the server's no-store braces: never let the browser HTTP cache
+    // answer for live per-user data.
+    cache: 'no-store',
     ...init,
     headers: {
       'Content-Type': 'application/json',

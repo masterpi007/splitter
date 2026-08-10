@@ -39,8 +39,11 @@ export function MemberSelector() {
         group.members.find((m) => m.userId === session.userId) ??
         group.members.find((m) => m.id === session.userId);
       if (member) {
-        // Update if ID changed OR name changed
-        if (currentUser?.id !== member.id || currentUser?.name !== member.name) {
+        // Adopt the fresh member row whenever it differs — comparing only
+        // id/name left bank & avatar changes from other devices invisible
+        // until a full reload. Reference equality settles after one pass
+        // because we store the row object itself.
+        if (currentUser !== member) {
           setCurrentUser(member);
         }
       }

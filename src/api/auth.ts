@@ -15,6 +15,7 @@ async function fetchAuthApi<T>(
   options?: RequestInit
 ): Promise<T> {
   const response = await fetch(`${API_BASE}${endpoint}`, {
+    cache: 'no-store', // session state must never come from browser cache
     ...options,
     credentials: 'include', // Include cookies for session
     headers: {

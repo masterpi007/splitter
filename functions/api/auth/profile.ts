@@ -1,8 +1,41 @@
 import type { AuthEnv } from '../types/auth';
 import { createSession, createAuthCookie } from '../utils/jwt';
 import { requireSession, requireGroup } from '../utils/session';
-import { saveGroup } from '../utils/groups';
-import { getUser, saveUser } from '../utils/users';
+import { getGroup, saveGroup } from '../utils/groups';
+import { getUser, saveUser, getMemberships } from '../utils/users';
+import type { AuthEnv as Env } from '../types/auth';
+
+// Propagate identity fields (name, avatar) to the user's member row in every
+// group — bank details stay per-group by design. A group where the new name
+// collides with another member keeps its old name there (avatar still updates).
+async function propagateIdentity(
+  env: Env,
+  userId: string,
+  fields: { name: string; avatarSeed?: string },
+  excludeGroupId?: string,
+): Promise<void> {
+  const memberships = await getMemberships(env, userId);
+  for (const m of memberships) {
+    if (m.groupId === excludeGroupId) continue;
+    const g = await getGroup(env, m.groupId);
+    if (!g) continue;
+    const row = g.members.find((mem) => mem.id === m.memberId);
+    if (!row || row.removedAt) continue;
+    const nameTaken = g.members.some(
+      (mem) => mem.id !== row.id && mem.name.toLowerCase() === fields.name.toLowerCase(),
+    );
+    const updated = {
+      ...row,
+      ...(!nameTaken && { name: fields.name }),
+      ...(fields.avatarSeed !== undefined && { avatarSeed: fields.avatarSeed }),
+    };
+    if (updated.name === row.name && updated.avatarSeed === row.avatarSeed) continue;
+    await saveGroup(env, {
+      ...g,
+      members: g.members.map((mem) => (mem.id === row.id ? updated : mem)),
+    });
+  }
+}
 
 // PUT /api/auth/profile — update the caller's profile.
 // When X-Group-Id is present and the caller is a member, also updates the
@@ -89,6 +122,9 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
         await saveUser(context.env, { ...user, name: trimmedName });
       }
 
+      // Name and avatar follow the user everywhere; bank stays per-group.
+      await propagateIdentity(context.env, session.userId, { name: trimmedName, avatarSeed }, group.id);
+
       const { token: newToken } = await createSession(context.env, session.userId, trimmedName);
 
       return new Response(
@@ -113,6 +149,8 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
     }
 
     await saveUser(context.env, { ...user, name: trimmedName });
+
+    await propagateIdentity(context.env, session.userId, { name: trimmedName, avatarSeed });
 
     const { token: newToken } = await createSession(context.env, session.userId, trimmedName);
 
