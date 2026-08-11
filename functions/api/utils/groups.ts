@@ -1,11 +1,23 @@
-// Data layer for groups, members, and expenses.
-// Encapsulates KV access so the legacy single-group schema
-// (keys 'group' and 'expenses', no admins/userId fields) remains
-// readable/writable without a batch migration. The first read of
-// a legacy record lazily adds the missing fields in place.
+// Data layer for groups, members, and expenses, backed by D1.
+//
+// The nested shapes below (a GroupRecord carrying its members, an Expense
+// carrying its splits/items/tags/history) are what the rest of the codebase
+// works with; utils/db.ts owns the flattening to and from rows. Every
+// exported signature is unchanged from the KV implementation so handlers did
+// not have to move.
 
 import type { AuthEnv } from '../types/auth';
+import {
+  MEMBER_UPSERT_SQL,
+  expenseWriteStatements,
+  loadExpenses,
+  memberBindings,
+  rowToMember,
+  type MemberRow,
+} from './db';
 
+// Retained so the pre-multi-group handlers still compile. No record carries
+// this id any more; those branches are dead and get removed separately.
 export const LEGACY_GROUP_ID = '1matrix';
 
 export interface GroupMember {
@@ -41,79 +53,63 @@ export interface GroupSummary {
   memberCount: number;
 }
 
-const GROUP_INDEX_KEY = 'group-index';
-
-function groupKey(groupId: string): string {
-  return groupId === LEGACY_GROUP_ID ? 'group' : `group::${groupId}`;
-}
-
-function expensesKey(groupId: string): string {
-  return groupId === LEGACY_GROUP_ID ? 'expenses' : `expenses::${groupId}`;
-}
-
-// Promote a raw KV record to the current GroupRecord shape.
-// Idempotent — running twice produces the same result.
-function promoteGroupShape(raw: any, expectedGroupId: string): GroupRecord {
-  const members: GroupMember[] = (raw.members ?? []).map((m: any) => ({
-    ...m,
-    // Legacy invariant: userId === memberId for pre-existing members
-    userId: m.userId ?? m.id,
-  }));
-  const removedMembers: GroupMember[] = (raw.removedMembers ?? []).map((m: any) => ({
-    ...m,
-    userId: m.userId ?? m.id,
-  }));
-  const admins: string[] = Array.isArray(raw.admins) && raw.admins.length > 0
-    ? raw.admins
-    // Legacy group has no admin info — promote every current member to co-admin.
-    // The group owner can demote others later.
-    : members.map((m) => m.id);
-
-  return {
-    id: expectedGroupId,
-    name: raw.name ?? 'Expenses',
-    currency: raw.currency ?? 'K',
-    admins,
-    members,
-    removedMembers,
-    createdBy: raw.createdBy,
-    createdAt: raw.createdAt ?? new Date().toISOString(),
-  };
-}
-
-// True if the promoted form differs from what's stored (i.e. needs write-back).
-function needsPromotion(raw: any, expectedGroupId: string): boolean {
-  if (!raw) return false;
-  if (raw.id !== expectedGroupId) return true;
-  if (!Array.isArray(raw.admins) || raw.admins.length === 0) return true;
-  if (!Array.isArray(raw.removedMembers)) return true;
-  if ((raw.members ?? []).some((m: any) => !m.userId)) return true;
-  return false;
-}
-
-// Load a group by id. If the stored record is in legacy shape, promote it
-// in memory before returning. We deliberately do NOT write the promoted
-// record back from a read path: under concurrent reads interleaved with a
-// saveGroup, a stale reader could otherwise overwrite a just-written
-// mutation with the old promoted shape (a classic lost-update race). The
-// next saveGroup call from any mutation path will persist the new shape,
-// and reads in the meantime remain correct because promoteGroupShape is
-// idempotent. Returns null if no record exists.
 export async function getGroup(
   env: AuthEnv,
   groupId: string,
 ): Promise<GroupRecord | null> {
-  const raw = await env.SPLITTER_KV.get<any>(groupKey(groupId), 'json');
-  if (!raw) return null;
-  if (needsPromotion(raw, groupId)) {
-    return promoteGroupShape(raw, groupId);
+  const [groupRes, memberRes] = await env.DB.batch([
+    env.DB.prepare(`SELECT * FROM groups WHERE id = ?`).bind(groupId),
+    env.DB.prepare(`SELECT * FROM members WHERE group_id = ? ORDER BY joined_at`).bind(groupId),
+  ]);
+  const g = groupRes.results?.[0] as
+    | { id: string; name: string; currency: string; created_at: string }
+    | undefined;
+  if (!g) return null;
+
+  const rows = memberRes.results as unknown as MemberRow[];
+  const members: GroupMember[] = [];
+  const removedMembers: GroupMember[] = [];
+  const admins: string[] = [];
+  for (const row of rows) {
+    const member = rowToMember(row);
+    if (member.removedAt) removedMembers.push(member);
+    else {
+      members.push(member);
+      if (row.is_admin) admins.push(member.id);
+    }
   }
-  return raw as GroupRecord;
+  return {
+    id: g.id,
+    name: g.name,
+    currency: g.currency,
+    admins,
+    members,
+    removedMembers,
+    createdAt: g.created_at,
+  };
 }
 
+// Whole-record save, mirroring the KV call sites that read a group, mutate
+// the object and write it back. Members absent from the record are deleted;
+// admin flags come from group.admins.
 export async function saveGroup(env: AuthEnv, group: GroupRecord): Promise<void> {
-  await env.SPLITTER_KV.put(groupKey(group.id), JSON.stringify(group));
-  await ensureInIndex(env, group.id);
+  const all = [...group.members, ...group.removedMembers];
+  const adminIds = new Set(group.admins);
+  const keep = all.map((m) => m.id);
+  const placeholders = keep.map(() => '?').join(', ') || "''";
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO groups (id, name, currency, created_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, currency = excluded.currency`,
+    ).bind(group.id, group.name, group.currency, group.createdAt),
+    ...all.map((m) =>
+      env.DB.prepare(MEMBER_UPSERT_SQL).bind(...memberBindings(group.id, m, adminIds.has(m.id))),
+    ),
+    env.DB.prepare(
+      `DELETE FROM members WHERE group_id = ? AND id NOT IN (${placeholders})`,
+    ).bind(group.id, ...keep),
+  ]);
 }
 
 export async function createGroup(
@@ -137,8 +133,8 @@ export async function createGroup(
   return group;
 }
 
-// Mark a member as removed. Keeps the entry in removedMembers so existing
-// expenses (which reference memberId) still render names in history.
+// Mark a member as removed. The row stays so existing expenses (which
+// reference memberId) still render names in history.
 export async function softRemoveMember(
   env: AuthEnv,
   group: GroupRecord,
@@ -146,15 +142,19 @@ export async function softRemoveMember(
 ): Promise<GroupRecord> {
   const idx = group.members.findIndex((m) => m.id === memberId);
   if (idx === -1) return group;
-  const removed = { ...group.members[idx], removedAt: new Date().toISOString() };
-  const updated: GroupRecord = {
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `UPDATE members SET removed_at = ?, is_admin = 0 WHERE id = ? AND group_id = ?`,
+  )
+    .bind(now, memberId, group.id)
+    .run();
+  const removed = { ...group.members[idx], removedAt: now };
+  return {
     ...group,
     members: group.members.filter((m) => m.id !== memberId),
     removedMembers: [...group.removedMembers, removed],
     admins: group.admins.filter((id) => id !== memberId),
   };
-  await saveGroup(env, updated);
-  return updated;
 }
 
 // Return members (active + removed) so old expense rows still resolve names.
@@ -223,16 +223,26 @@ export interface Expense {
 }
 
 export async function getExpenses(env: AuthEnv, groupId: string): Promise<unknown[]> {
-  const data = await env.SPLITTER_KV.get<unknown[]>(expensesKey(groupId), 'json');
-  return data ?? [];
+  return loadExpenses(env, groupId);
 }
 
+// Whole-list save kept for the handlers that read every expense, mutate one
+// and write the list back. Rows missing from the list are deleted; the rest
+// are upserted, so a single-expense edit touches only that expense's rows.
 export async function saveExpenses(
   env: AuthEnv,
   groupId: string,
   expenses: unknown[],
 ): Promise<void> {
-  await env.SPLITTER_KV.put(expensesKey(groupId), JSON.stringify(expenses));
+  const list = expenses as Expense[];
+  const keep = list.map((e) => e.id);
+  const placeholders = keep.map(() => '?').join(', ') || "''";
+  await env.DB.batch([
+    env.DB.prepare(
+      `DELETE FROM expenses WHERE group_id = ? AND id NOT IN (${placeholders})`,
+    ).bind(groupId, ...keep),
+    ...list.flatMap((e) => expenseWriteStatements(env, groupId, e)),
+  ]);
 }
 
 // Resolve member ids to their user ids (for user-scoped notifiers like
@@ -319,31 +329,28 @@ export function validateExpenseInput(
   return null;
 }
 
-// --- Group index ---
-// Tracks non-legacy group ids so `listGroupIds` doesn't need a KV list scan.
-// Legacy group is detected separately by checking the old 'group' key.
-
-async function ensureInIndex(env: AuthEnv, groupId: string): Promise<void> {
-  if (groupId === LEGACY_GROUP_ID) return;
-  const index = (await env.SPLITTER_KV.get<string[]>(GROUP_INDEX_KEY, 'json')) ?? [];
-  if (!index.includes(groupId)) {
-    index.push(groupId);
-    await env.SPLITTER_KV.put(GROUP_INDEX_KEY, JSON.stringify(index));
-  }
-}
-
 export async function listGroupIds(env: AuthEnv): Promise<string[]> {
-  const index = (await env.SPLITTER_KV.get<string[]>(GROUP_INDEX_KEY, 'json')) ?? [];
-  const hasLegacy = (await env.SPLITTER_KV.get('group')) !== null;
-  return hasLegacy ? [LEGACY_GROUP_ID, ...index.filter((id) => id !== LEGACY_GROUP_ID)] : index;
+  const res = await env.DB.prepare(`SELECT id FROM groups ORDER BY created_at`).all<{ id: string }>();
+  return (res.results ?? []).map((r) => r.id);
 }
 
 export async function getGroupSummaries(
   env: AuthEnv,
   groupIds: string[],
 ): Promise<GroupSummary[]> {
-  const groups = await Promise.all(groupIds.map((id) => getGroup(env, id)));
-  return groups
-    .filter((g): g is GroupRecord => g !== null)
-    .map((g) => ({ id: g.id, name: g.name, memberCount: g.members.length }));
+  if (groupIds.length === 0) return [];
+  const placeholders = groupIds.map(() => '?').join(', ');
+  const res = await env.DB.prepare(
+    `SELECT g.id, g.name,
+            (SELECT count(*) FROM members m WHERE m.group_id = g.id AND m.removed_at IS NULL) AS member_count
+       FROM groups g WHERE g.id IN (${placeholders})`,
+  )
+    .bind(...groupIds)
+    .all<{ id: string; name: string; member_count: number }>();
+  const byId = new Map((res.results ?? []).map((r) => [r.id, r]));
+  // Preserve the caller's ordering (membership order, not insertion order).
+  return groupIds
+    .map((id) => byId.get(id))
+    .filter((r): r is { id: string; name: string; member_count: number } => !!r)
+    .map((r) => ({ id: r.id, name: r.name, memberCount: r.member_count }));
 }

@@ -1,5 +1,12 @@
+// WebAuthn keyring, backed by D1.
+//
+// Credentials used to live in one KV blob per user, which made
+// findCredentialOwner a full list-scan of every user's blob on each sign-in.
+// Here the credential id is the primary key, so the same lookup is a single
+// indexed read.
+
 import type { StoredCredential, AuthEnv } from '../types/auth';
-import { KV_KEYS } from '../types/auth';
+import type { AuthenticatorTransportFuture, CredentialDeviceType } from '@simplewebauthn/server';
 
 // Helper to convert Uint8Array to base64url string for storage
 export function uint8ArrayToBase64(arr: Uint8Array): string {
@@ -21,143 +28,159 @@ export function base64ToUint8Array(base64: string): Uint8Array {
   return bytes;
 }
 
-// Serializable version of StoredCredential for KV storage
-interface SerializedCredential {
+interface CredentialRow {
   id: string;
-  publicKey: string; // base64url encoded
+  user_id: string;
+  public_key: string;
   counter: number;
-  deviceType: string;
-  backedUp: boolean;
-  transports?: string[];
-  createdAt: string;
-  lastUsedAt?: string;
-  friendlyName?: string;
+  transports: string | null;
+  device_type: string | null;
+  backed_up: number;
+  name: string | null;
+  created_at: string;
+  last_used_at: string | null;
 }
 
-function serializeCredential(cred: StoredCredential): SerializedCredential {
+function rowToCredential(r: CredentialRow): StoredCredential {
   return {
-    ...cred,
-    publicKey: uint8ArrayToBase64(cred.publicKey),
+    id: r.id,
+    publicKey: base64ToUint8Array(r.public_key),
+    counter: r.counter,
+    deviceType: (r.device_type ?? 'singleDevice') as CredentialDeviceType,
+    backedUp: r.backed_up === 1,
+    transports: r.transports
+      ? (JSON.parse(r.transports) as AuthenticatorTransportFuture[])
+      : undefined,
+    createdAt: r.created_at,
+    lastUsedAt: r.last_used_at ?? undefined,
+    friendlyName: r.name ?? undefined,
   };
 }
 
-function deserializeCredential(cred: SerializedCredential): StoredCredential {
-  return {
-    ...cred,
-    publicKey: base64ToUint8Array(cred.publicKey),
-  } as StoredCredential;
-}
+const SELECT_COLUMNS = `id, user_id, public_key, counter, transports, device_type,
+                        backed_up, name, created_at, last_used_at`;
 
-// Get all credentials for a member
 export async function getCredentials(
   env: AuthEnv,
-  memberId: string
+  memberId: string,
 ): Promise<StoredCredential[]> {
-  const data = await env.SPLITTER_KV.get<SerializedCredential[]>(
-    KV_KEYS.credentials(memberId),
-    'json'
-  );
-  if (!data) return [];
-  return data.map(deserializeCredential);
+  const res = await env.DB.prepare(
+    `SELECT ${SELECT_COLUMNS} FROM credentials WHERE user_id = ? ORDER BY created_at`,
+  )
+    .bind(memberId)
+    .all<CredentialRow>();
+  return (res.results ?? []).map(rowToCredential);
 }
 
-// Add a new credential for a member
 export async function addCredential(
   env: AuthEnv,
   memberId: string,
-  credential: StoredCredential
+  credential: StoredCredential,
 ): Promise<void> {
-  const existing = await getCredentials(env, memberId);
-  const serialized = existing.map(serializeCredential);
-  serialized.push(serializeCredential(credential));
-  await env.SPLITTER_KV.put(
-    KV_KEYS.credentials(memberId),
-    JSON.stringify(serialized)
-  );
+  await env.DB.prepare(
+    `INSERT INTO credentials (id, user_id, public_key, counter, transports, device_type,
+                              backed_up, name, created_at, last_used_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       counter = excluded.counter,
+       transports = excluded.transports,
+       name = excluded.name,
+       last_used_at = excluded.last_used_at`,
+  )
+    .bind(
+      credential.id,
+      memberId,
+      uint8ArrayToBase64(credential.publicKey),
+      credential.counter,
+      credential.transports ? JSON.stringify(credential.transports) : null,
+      credential.deviceType ?? null,
+      credential.backedUp ? 1 : 0,
+      credential.friendlyName ?? null,
+      credential.createdAt,
+      credential.lastUsedAt ?? null,
+    )
+    .run();
 }
 
-// Update a credential (e.g., counter after authentication)
+// Bump the signature counter (and last-used stamp) after a successful login.
 export async function updateCredential(
   env: AuthEnv,
   memberId: string,
   credentialId: string,
-  updates: Partial<Pick<StoredCredential, 'counter' | 'lastUsedAt'>>
+  updates: Partial<StoredCredential>,
 ): Promise<void> {
-  const credentials = await getCredentials(env, memberId);
-  const updated = credentials.map(cred => {
-    if (cred.id === credentialId) {
-      return { ...cred, ...updates };
-    }
-    return cred;
-  });
-  const serialized = updated.map(serializeCredential);
-  await env.SPLITTER_KV.put(
-    KV_KEYS.credentials(memberId),
-    JSON.stringify(serialized)
-  );
+  const sets: string[] = [];
+  const binds: unknown[] = [];
+  if (updates.counter !== undefined) {
+    sets.push('counter = ?');
+    binds.push(updates.counter);
+  }
+  if (updates.lastUsedAt !== undefined) {
+    sets.push('last_used_at = ?');
+    binds.push(updates.lastUsedAt);
+  }
+  if (updates.friendlyName !== undefined) {
+    sets.push('name = ?');
+    binds.push(updates.friendlyName);
+  }
+  if (sets.length === 0) return;
+  binds.push(credentialId, memberId);
+  await env.DB.prepare(
+    `UPDATE credentials SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`,
+  )
+    .bind(...binds)
+    .run();
 }
 
-// Delete a credential
 export async function deleteCredential(
   env: AuthEnv,
   memberId: string,
-  credentialId: string
+  credentialId: string,
 ): Promise<boolean> {
-  const credentials = await getCredentials(env, memberId);
-  const filtered = credentials.filter(c => c.id !== credentialId);
-
-  if (filtered.length === credentials.length) {
-    return false; // Credential not found
-  }
-
-  if (filtered.length === 0) {
-    await env.SPLITTER_KV.delete(KV_KEYS.credentials(memberId));
-  } else {
-    const serialized = filtered.map(serializeCredential);
-    await env.SPLITTER_KV.put(
-      KV_KEYS.credentials(memberId),
-      JSON.stringify(serialized)
-    );
-  }
-  return true;
+  const res = await env.DB.prepare(
+    `DELETE FROM credentials WHERE id = ? AND user_id = ?`,
+  )
+    .bind(credentialId, memberId)
+    .run();
+  return (res.meta?.changes ?? 0) > 0;
 }
 
-// Check if a member has any passkeys registered
-export async function hasPasskeys(
-  env: AuthEnv,
-  memberId: string
-): Promise<boolean> {
-  const credentials = await getCredentials(env, memberId);
-  return credentials.length > 0;
+export async function hasPasskeys(env: AuthEnv, memberId: string): Promise<boolean> {
+  const row = await env.DB.prepare(
+    `SELECT 1 AS present FROM credentials WHERE user_id = ? LIMIT 1`,
+  )
+    .bind(memberId)
+    .first<{ present: number }>();
+  return !!row;
 }
 
-// Find a credential by ID for a specific member
 export async function findCredentialById(
   env: AuthEnv,
   memberId: string,
-  credentialId: string
+  credentialId: string,
 ): Promise<StoredCredential | null> {
-  const credentials = await getCredentials(env, memberId);
-  return credentials.find(c => c.id === credentialId) || null;
+  const row = await env.DB.prepare(
+    `SELECT ${SELECT_COLUMNS} FROM credentials WHERE id = ? AND user_id = ?`,
+  )
+    .bind(credentialId, memberId)
+    .first<CredentialRow>();
+  return row ? rowToCredential(row) : null;
 }
 
-// Find credential owner by searching all credentials
-// Returns the memberId and credential if found
+// Discoverable-credential sign-in: the browser hands us only a credential id.
 export async function findCredentialOwner(
   env: AuthEnv,
-  credentialId: string
+  credentialId: string,
 ): Promise<{ memberId: string; credential: StoredCredential } | null> {
-  // List all keys that start with 'credentials:'
-  const list = await env.SPLITTER_KV.list({ prefix: 'credentials:' });
+  const row = await env.DB.prepare(
+    `SELECT ${SELECT_COLUMNS} FROM credentials WHERE id = ?`,
+  )
+    .bind(credentialId)
+    .first<CredentialRow>();
+  return row ? { memberId: row.user_id, credential: rowToCredential(row) } : null;
+}
 
-  for (const key of list.keys) {
-    const memberId = key.name.replace('credentials:', '');
-    const credentials = await getCredentials(env, memberId);
-    const credential = credentials.find(c => c.id === credentialId);
-    if (credential) {
-      return { memberId, credential };
-    }
-  }
-
-  return null;
+// Remove every passkey for a user (admin-initiated recovery, account delete).
+export async function deleteAllCredentials(env: AuthEnv, memberId: string): Promise<void> {
+  await env.DB.prepare(`DELETE FROM credentials WHERE user_id = ?`).bind(memberId).run();
 }

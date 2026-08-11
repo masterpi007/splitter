@@ -4,6 +4,7 @@ import { KV_KEYS } from '../../../types/auth';
 import { addCredential } from '../../../utils/credentials';
 import { createSession, createAuthCookie } from '../../../utils/jwt';
 import { getRp } from '../../../utils/rp';
+import { getEphemeral, deleteEphemeral, putEphemeral } from '../../../utils/db';
 
 interface InviteVerifyRequest {
   inviteCode: string;
@@ -31,10 +32,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     const env = context.env;
 
     // Get and validate the invite
-    const invite = await env.SPLITTER_KV.get<PasskeyInvite>(
-      KV_KEYS.invite(inviteCode),
-      'json'
-    );
+    const invite = await getEphemeral<PasskeyInvite>(env, KV_KEYS.invite(inviteCode));
 
     if (!invite) {
       return Response.json(
@@ -45,7 +43,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
 
     // Check if invite has expired
     if (new Date(invite.expiresAt) < new Date()) {
-      await env.SPLITTER_KV.delete(KV_KEYS.invite(inviteCode));
+      await deleteEphemeral(env, KV_KEYS.invite(inviteCode));
       return Response.json(
         { success: false, error: 'Invite code has expired' },
         { status: 400 }
@@ -53,10 +51,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     }
 
     // Get and consume the challenge
-    const challengeData = await env.SPLITTER_KV.get<StoredChallenge>(
-      KV_KEYS.inviteChallenge(inviteCode),
-      'json'
-    );
+    const challengeData = await getEphemeral<StoredChallenge>(env, KV_KEYS.inviteChallenge(inviteCode));
 
     if (!challengeData) {
       return Response.json(
@@ -66,7 +61,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     }
 
     // Delete the challenge immediately (one-time use)
-    await env.SPLITTER_KV.delete(KV_KEYS.inviteChallenge(inviteCode));
+    await deleteEphemeral(env, KV_KEYS.inviteChallenge(inviteCode));
 
     // Check if challenge has expired
     if (new Date(challengeData.expiresAt) < new Date()) {
@@ -109,7 +104,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
 
     await addCredential(env, userId, storedCredential);
 
-    await env.SPLITTER_KV.delete(KV_KEYS.invite(inviteCode));
+    await deleteEphemeral(env, KV_KEYS.invite(inviteCode));
 
     const { session, token } = await createSession(env, userId, userName);
 

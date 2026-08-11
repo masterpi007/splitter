@@ -9,6 +9,7 @@
 
 import type { AuthEnv, PasskeyInvite } from '../types/auth';
 import { KV_KEYS, INVITE_TTL_SECONDS } from '../types/auth';
+import { putEphemeral } from './db';
 
 // Short, easy-to-type code. Uppercase + digits, omitting ambiguous
 // characters (0/O/I/1/L). Uppercase-only also keeps these codes disjoint from
@@ -49,11 +50,7 @@ export async function createPasskeyInvite(
     expiresAt: new Date(now + ttl * 1000).toISOString(),
   };
 
-  await env.SPLITTER_KV.put(
-    KV_KEYS.invite(inviteCode),
-    JSON.stringify(invite),
-    { expirationTtl: ttl },
-  );
+  await putEphemeral(env, KV_KEYS.invite(inviteCode), 'passkey_invite', invite, ttl);
 
   return {
     inviteCode,

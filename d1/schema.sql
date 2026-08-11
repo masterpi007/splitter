@@ -93,6 +93,10 @@ CREATE INDEX members_group_idx ON members(group_id);
 CREATE INDEX members_user_idx ON members(user_id);
 CREATE UNIQUE INDEX members_group_name_idx
   ON members(group_id, lower(name)) WHERE removed_at IS NULL;
+-- One member row per user per group: the backstop against a double-tapped
+-- invite creating two rows for the same person.
+CREATE UNIQUE INDEX members_group_user_idx
+  ON members(group_id, user_id) WHERE user_id IS NOT NULL AND removed_at IS NULL;
 
 CREATE TABLE group_invites (
   code       TEXT PRIMARY KEY,

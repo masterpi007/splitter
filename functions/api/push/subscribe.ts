@@ -1,6 +1,6 @@
-import type { AuthEnv, PushSubscriptionRecord } from '../types/auth';
-import { KV_KEYS } from '../types/auth';
+import type { AuthEnv } from '../types/auth';
 import { requireGroup } from '../utils/session';
+import { getPushSubscriptions, savePushSubscriptions, deletePushSubscription } from '../utils/db';
 
 // Push subscriptions are keyed per (userId, groupId) so a device only
 // receives notifications for the groups it has actively subscribed to.
@@ -18,10 +18,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     return Response.json({ success: false, error: 'Invalid subscription' }, { status: 400 });
   }
 
-  const key = KV_KEYS.pushSubscriptions(ctx.session.userId, ctx.group.id);
-  const existing =
-    (await context.env.SPLITTER_KV.get<PushSubscriptionRecord[]>(key, 'json')) || [];
-
+  const existing = await getPushSubscriptions(context.env, ctx.session.userId, ctx.group.id);
   const filtered = existing.filter((s) => s.endpoint !== subscription.endpoint);
   filtered.push({
     endpoint: subscription.endpoint,
@@ -30,7 +27,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     userAgent: context.request.headers.get('User-Agent') || undefined,
   });
 
-  await context.env.SPLITTER_KV.put(key, JSON.stringify(filtered));
+  await savePushSubscriptions(context.env, ctx.session.userId, ctx.group.id, filtered);
 
   return Response.json({ success: true });
 };
@@ -44,11 +41,7 @@ export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
     return Response.json({ success: false, error: 'endpoint is required' }, { status: 400 });
   }
 
-  const key = KV_KEYS.pushSubscriptions(ctx.session.userId, ctx.group.id);
-  const existing =
-    (await context.env.SPLITTER_KV.get<PushSubscriptionRecord[]>(key, 'json')) || [];
-  const filtered = existing.filter((s) => s.endpoint !== endpoint);
-  await context.env.SPLITTER_KV.put(key, JSON.stringify(filtered));
+  await deletePushSubscription(context.env, ctx.session.userId, endpoint);
 
   return Response.json({ success: true });
 };

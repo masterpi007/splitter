@@ -1,12 +1,11 @@
-// User identity layer. A User is global and owns passkey credentials;
-// a User has zero or more group Memberships (one member record per group they belong to).
+// Global user identity, backed by D1.
 //
-// Legacy invariant: for members that existed before multi-group support,
-// userId === memberId. This lets existing `credentials:<memberId>` keys
-// continue to work when read as `credentials:<userId>`, with no rewrite.
+// A user has zero or more group memberships. There is no separate membership
+// record any more: a `members` row whose user_id matches (and which is not
+// soft-removed) *is* the membership, which removes the class of bug where the
+// two stores disagreed about who belonged to what.
 
 import type { AuthEnv } from '../types/auth';
-import { LEGACY_GROUP_ID, getGroup, findMember } from './groups';
 
 export interface User {
   id: string;
@@ -23,37 +22,28 @@ export interface UserMembership {
   joinedAt: string;
 }
 
-const userKey = (userId: string) => `user::${userId}`;
-const membershipsKey = (userId: string) => `user::${userId}::memberships`;
-
-// Resolve a user record. If no stored User exists but the userId matches a
-// legacy 1matrix member, synthesize a User + membership once and write them back.
 export async function getUser(env: AuthEnv, userId: string): Promise<User | null> {
-  const stored = await env.SPLITTER_KV.get<User>(userKey(userId), 'json');
-  if (stored) return stored;
-
-  // Legacy bootstrap: check if this id is a member of the legacy group.
-  const legacy = await getGroup(env, LEGACY_GROUP_ID);
-  if (!legacy) return null;
-  const member = findMember(legacy, userId);
-  if (!member) return null;
-
-  const user: User = {
-    id: userId,
-    name: member.name,
-    createdAt: legacy.createdAt,
+  const row = await env.DB.prepare(
+    `SELECT id, name, avatar_seed, created_at FROM users WHERE id = ?`,
+  )
+    .bind(userId)
+    .first<{ id: string; name: string; avatar_seed: string | null; created_at: string }>();
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    avatarSeed: row.avatar_seed ?? undefined,
+    createdAt: row.created_at,
   };
-  await saveUser(env, user);
-  await addMembership(env, userId, {
-    groupId: LEGACY_GROUP_ID,
-    memberId: userId,
-    joinedAt: member.joinedAt ?? legacy.createdAt,
-  });
-  return user;
 }
 
 export async function saveUser(env: AuthEnv, user: User): Promise<void> {
-  await env.SPLITTER_KV.put(userKey(user.id), JSON.stringify(user));
+  await env.DB.prepare(
+    `INSERT INTO users (id, name, avatar_seed, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET name = excluded.name, avatar_seed = excluded.avatar_seed`,
+  )
+    .bind(user.id, user.name, user.avatarSeed ?? null, user.createdAt)
+    .run();
 }
 
 export async function createUser(
@@ -73,49 +63,49 @@ export async function getMemberships(
   env: AuthEnv,
   userId: string,
 ): Promise<UserMembership[]> {
-  const stored = await env.SPLITTER_KV.get<UserMembership[]>(
-    membershipsKey(userId),
-    'json',
-  );
-  if (stored) return stored;
-
-  // Legacy bootstrap: if the user is in the legacy group, seed it.
-  const legacy = await getGroup(env, LEGACY_GROUP_ID);
-  if (legacy && findMember(legacy, userId)) {
-    const bootstrapped: UserMembership[] = [
-      {
-        groupId: LEGACY_GROUP_ID,
-        memberId: userId,
-        joinedAt: legacy.createdAt,
-      },
-    ];
-    await env.SPLITTER_KV.put(membershipsKey(userId), JSON.stringify(bootstrapped));
-    return bootstrapped;
-  }
-
-  return [];
+  const res = await env.DB.prepare(
+    `SELECT group_id, id AS member_id, joined_at
+       FROM members
+      WHERE user_id = ? AND removed_at IS NULL
+      ORDER BY joined_at`,
+  )
+    .bind(userId)
+    .all<{ group_id: string; member_id: string; joined_at: string | null }>();
+  return (res.results ?? []).map((r) => ({
+    groupId: r.group_id,
+    memberId: r.member_id,
+    joinedAt: r.joined_at ?? '',
+  }));
 }
 
+// Link an existing member row to a user. The row itself is created by the
+// group/invite flow; this just claims it, so the call is idempotent.
 export async function addMembership(
   env: AuthEnv,
   userId: string,
   membership: UserMembership,
 ): Promise<void> {
-  const existing = await getMemberships(env, userId);
-  // Dedupe by groupId — a user has at most one member row per group.
-  const filtered = existing.filter((m) => m.groupId !== membership.groupId);
-  filtered.push(membership);
-  await env.SPLITTER_KV.put(membershipsKey(userId), JSON.stringify(filtered));
+  await env.DB.prepare(
+    `UPDATE members
+        SET user_id = ?, joined_at = coalesce(joined_at, ?)
+      WHERE id = ? AND group_id = ?`,
+  )
+    .bind(userId, membership.joinedAt, membership.memberId, membership.groupId)
+    .run();
 }
 
+// Leaving a group is a soft removal so past expenses still resolve the name.
 export async function removeMembership(
   env: AuthEnv,
   userId: string,
   groupId: string,
 ): Promise<void> {
-  const existing = await getMemberships(env, userId);
-  const filtered = existing.filter((m) => m.groupId !== groupId);
-  await env.SPLITTER_KV.put(membershipsKey(userId), JSON.stringify(filtered));
+  await env.DB.prepare(
+    `UPDATE members SET removed_at = coalesce(removed_at, ?), is_admin = 0
+      WHERE user_id = ? AND group_id = ?`,
+  )
+    .bind(new Date().toISOString(), userId, groupId)
+    .run();
 }
 
 export async function isUserMemberOfGroup(
@@ -123,6 +113,14 @@ export async function isUserMemberOfGroup(
   userId: string,
   groupId: string,
 ): Promise<UserMembership | null> {
-  const memberships = await getMemberships(env, userId);
-  return memberships.find((m) => m.groupId === groupId) ?? null;
+  const row = await env.DB.prepare(
+    `SELECT group_id, id AS member_id, joined_at
+       FROM members
+      WHERE user_id = ? AND group_id = ? AND removed_at IS NULL`,
+  )
+    .bind(userId, groupId)
+    .first<{ group_id: string; member_id: string; joined_at: string | null }>();
+  return row
+    ? { groupId: row.group_id, memberId: row.member_id, joinedAt: row.joined_at ?? '' }
+    : null;
 }

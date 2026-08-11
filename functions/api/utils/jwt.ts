@@ -20,12 +20,11 @@ export async function createSession(
     expiresAt,
   };
 
-  // Store session in KV
-  await env.SPLITTER_KV.put(
-    KV_KEYS.session(sessionId),
-    JSON.stringify(session),
-    { expirationTtl: SESSION_TTL_SECONDS }
-  );
+  await env.DB.prepare(
+    `INSERT INTO sessions (id, user_id, user_name, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
+  )
+    .bind(sessionId, userId, userName, session.createdAt, expiresAt)
+    .run();
 
   // Create JWT token
   const secret = new TextEncoder().encode(env.JWT_SECRET);
@@ -75,28 +74,25 @@ export async function getSession(
   env: AuthEnv,
   sessionId: string
 ): Promise<Session | null> {
-  const data = await env.SPLITTER_KV.get<Session | LegacySession>(
-    KV_KEYS.session(sessionId),
-    'json',
-  );
-  if (!data) return null;
-  if ('userId' in data) return data;
+  const row = await env.DB.prepare(
+    `SELECT id, user_id, user_name, created_at, expires_at FROM sessions WHERE id = ?`,
+  )
+    .bind(sessionId)
+    .first<{
+      id: string;
+      user_id: string;
+      user_name: string;
+      created_at: string;
+      expires_at: string;
+    }>();
+  if (!row) return null;
   return {
-    sessionId: data.sessionId,
-    userId: data.memberId,
-    userName: data.memberName,
-    createdAt: data.createdAt,
-    expiresAt: data.expiresAt,
+    sessionId: row.id,
+    userId: row.user_id,
+    userName: row.user_name,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
   };
-}
-
-// Legacy shape kept local to this file for one-way normalization on read.
-interface LegacySession {
-  sessionId: string;
-  memberId: string;
-  memberName: string;
-  createdAt: string;
-  expiresAt: string;
 }
 
 // Delete session (logout)
@@ -104,7 +100,7 @@ export async function deleteSession(
   env: AuthEnv,
   sessionId: string
 ): Promise<void> {
-  await env.SPLITTER_KV.delete(KV_KEYS.session(sessionId));
+  await env.DB.prepare(`DELETE FROM sessions WHERE id = ?`).bind(sessionId).run();
 }
 
 // Verify token and session are both valid

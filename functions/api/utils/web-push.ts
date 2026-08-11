@@ -7,6 +7,7 @@ import type { AuthEnv, PushSubscriptionRecord, NotificationRecord, NotifyPrefs, 
 import { KV_KEYS, DEFAULT_NOTIFY_PREFS } from '../types/auth';
 import type { GroupRecord } from './groups';
 import { findMember } from './groups';
+import { getNotifications, saveNotifications, getPushPrefs, getPushSubscriptions, deletePushSubscription } from './db';
 
 const MAX_NOTIFICATIONS = 50; // Keep last 50 per (user, group)
 
@@ -268,8 +269,7 @@ export async function notifyMembers(
   // independent so the reads and writes overlap.
   await Promise.all(
     resolved.map(async ({ userId }) => {
-      const notiKey = KV_KEYS.notifications(userId, group.id);
-      const existing = (await env.SPLITTER_KV.get<NotificationRecord[]>(notiKey, 'json')) || [];
+      const existing = await getNotifications(env, userId, group.id);
       const record: NotificationRecord = {
         id: crypto.randomUUID(),
         title: payload.title,
@@ -279,30 +279,24 @@ export async function notifyMembers(
         read: false,
       };
       const updated = [record, ...existing].slice(0, MAX_NOTIFICATIONS);
-      await env.SPLITTER_KV.put(notiKey, JSON.stringify(updated));
+      await saveNotifications(env, userId, group.id, updated);
     }),
   );
 
   for (const { userId } of resolved) {
     if (event) {
-      const prefs = await env.SPLITTER_KV.get<NotifyPrefs>(
-        KV_KEYS.pushPrefs(userId, group.id),
-        'json',
-      ) ?? DEFAULT_NOTIFY_PREFS;
+      const prefs = await getPushPrefs(env, userId, group.id);
       if (!prefs[event]) continue;
     }
-    const key = KV_KEYS.pushSubscriptions(userId, group.id);
-    const subscriptions = await env.SPLITTER_KV.get<PushSubscriptionRecord[]>(key, 'json');
-    if (!subscriptions || subscriptions.length === 0) continue;
+    const subscriptions = await getPushSubscriptions(env, userId, group.id);
+    if (subscriptions.length === 0) continue;
 
     for (const sub of subscriptions) {
       tasks.push(
         sendPushNotification(env, sub, payload).then(async (result) => {
           if (result === 'expired') {
-            const current =
-              (await env.SPLITTER_KV.get<PushSubscriptionRecord[]>(key, 'json')) || [];
-            const updated = current.filter((s: PushSubscriptionRecord) => s.endpoint !== sub.endpoint);
-            await env.SPLITTER_KV.put(key, JSON.stringify(updated));
+            // Drop just the dead endpoint; a row delete, not a blob rewrite.
+            await deletePushSubscription(env, userId, sub.endpoint);
           }
         }),
       );

@@ -3,6 +3,7 @@ import type { AuthEnv, PasskeyInvite, StoredChallenge } from '../../../types/aut
 import { KV_KEYS, CHALLENGE_TTL_SECONDS } from '../../../types/auth';
 import { getCredentials } from '../../../utils/credentials';
 import { getRp } from '../../../utils/rp';
+import { getEphemeral, deleteEphemeral, putEphemeral } from '../../../utils/db';
 
 interface InviteOptionsRequest {
   inviteCode: string;
@@ -23,10 +24,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     const env = context.env;
 
     // Get and validate the invite
-    const invite = await env.SPLITTER_KV.get<PasskeyInvite>(
-      KV_KEYS.invite(inviteCode),
-      'json'
-    );
+    const invite = await getEphemeral<PasskeyInvite>(env, KV_KEYS.invite(inviteCode));
 
     if (!invite) {
       return Response.json(
@@ -37,7 +35,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
 
     // Check if invite has expired
     if (new Date(invite.expiresAt) < new Date()) {
-      await env.SPLITTER_KV.delete(KV_KEYS.invite(inviteCode));
+      await deleteEphemeral(env, KV_KEYS.invite(inviteCode));
       return Response.json(
         { success: false, error: 'Invite code has expired' },
         { status: 400 }
@@ -75,11 +73,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
       expiresAt: new Date(now + CHALLENGE_TTL_SECONDS * 1000).toISOString(),
     };
 
-    await env.SPLITTER_KV.put(
-      KV_KEYS.inviteChallenge(inviteCode),
-      JSON.stringify(storedChallenge),
-      { expirationTtl: CHALLENGE_TTL_SECONDS }
-    );
+    await putEphemeral(env, KV_KEYS.inviteChallenge(inviteCode), 'challenge', storedChallenge, CHALLENGE_TTL_SECONDS);
 
     return Response.json({
       success: true,

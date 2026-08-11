@@ -1,13 +1,12 @@
-import type { AuthEnv, NotificationRecord } from './types/auth';
-import { KV_KEYS } from './types/auth';
+import type { AuthEnv } from './types/auth';
 import { requireGroup } from './utils/session';
+import { getNotifications, saveNotifications } from './utils/db';
 
 // GET /api/notifications — notifications for (current user, active group).
 export const onRequestGet: PagesFunction<AuthEnv> = async (context) => {
   const ctx = await requireGroup(context.env, context.request);
   if (ctx instanceof Response) return ctx;
-  const key = KV_KEYS.notifications(ctx.session.userId, ctx.group.id);
-  const notifications = (await context.env.SPLITTER_KV.get<NotificationRecord[]>(key, 'json')) || [];
+  const notifications = await getNotifications(context.env, ctx.session.userId, ctx.group.id);
   return Response.json({ success: true, data: notifications });
 };
 
@@ -15,9 +14,11 @@ export const onRequestGet: PagesFunction<AuthEnv> = async (context) => {
 export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
   const ctx = await requireGroup(context.env, context.request);
   if (ctx instanceof Response) return ctx;
-  const key = KV_KEYS.notifications(ctx.session.userId, ctx.group.id);
-  const notifications = (await context.env.SPLITTER_KV.get<NotificationRecord[]>(key, 'json')) || [];
-  const updated = notifications.map((n) => ({ ...n, read: true }));
-  await context.env.SPLITTER_KV.put(key, JSON.stringify(updated));
+  await context.env.DB.prepare(
+    `UPDATE notifications SET read = 1 WHERE user_id = ? AND group_id = ?`,
+  )
+    .bind(ctx.session.userId, ctx.group.id)
+    .run();
+  const updated = await getNotifications(context.env, ctx.session.userId, ctx.group.id);
   return Response.json({ success: true, data: updated });
 };

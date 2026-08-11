@@ -5,6 +5,10 @@ import type {
 
 // Environment with auth config
 export interface AuthEnv {
+  // Primary store. KV cached reads for 60s per data centre, which made a
+  // write invisible to other devices for up to a minute; D1 reads hit the
+  // primary and its transactions replace the advisory expense lock.
+  DB: D1Database;
   SPLITTER_KV: KVNamespace;
   JWT_SECRET: string;
   // WebAuthn Relying Party overrides. Absent ⇒ derived from the request URL

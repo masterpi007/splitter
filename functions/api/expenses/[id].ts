@@ -13,7 +13,7 @@ import {
 } from '../utils/groups';
 import { notifyMembers as notifyPush } from '../utils/web-push';
 import { notifyMembers as notifyTelegram, sendDebouncedEditNotification, createCallbackData } from '../utils/telegram';
-import { acquireLockWithRetry } from '../utils/locks';
+import { loadExpense, writeExpense, deleteExpenseRow } from '../utils/db';
 
 // Fields that rewrite the "truth" of an expense (amount, attribution). Only
 // the original creator or a group admin can change these; anyone else can
@@ -157,28 +157,15 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
     const id = context.params.id as string;
     const updates = (await context.request.json()) as Partial<Expense>;
 
-    // The whole group's expenses live in one KV record; serialize the
-    // read-modify-write or concurrent updates (e.g. several members signing
-    // off at once) silently overwrite each other.
-    const lock = await acquireLockWithRetry(context.env, `expenses::${group.id}`);
-    if (!lock) {
-      return Response.json(
-        { success: false, error: 'Another update is in progress — please retry' },
-        { status: 409 },
-      );
-    }
-    try {
-      const expenses = (await getExpenses(context.env, group.id)) as Expense[];
-
-      const index = expenses.findIndex((e) => e.id === id);
-      if (index === -1) {
+    {
+      const before = await loadExpense(context.env, group.id, id);
+      if (!before) {
         return Response.json(
           { success: false, error: 'Expense not found' },
           { status: 404 },
         );
       }
 
-      const before = expenses[index];
       const merged: Expense = {
         ...before,
         ...updates,
@@ -208,9 +195,11 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
         ].slice(-HISTORY_CAP);
       }
 
-      expenses[index] = merged;
+      // Writes only this expense's rows, so two members accepting different
+      // transactions at the same time can no longer clobber each other — the
+      // reason the advisory lock existed.
       const updatedExpense = merged;
-      await saveExpenses(context.env, group.id, expenses);
+      await writeExpense(context.env, group.id, merged);
 
       const isDeleted = updatedExpense.tags?.includes('deleted');
       context.waitUntil(
@@ -218,8 +207,6 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
       );
 
       return Response.json({ success: true, data: updatedExpense });
-    } finally {
-      await lock.release();
     }
   } catch (error) {
     return Response.json(
@@ -237,25 +224,14 @@ export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
 
     const id = context.params.id as string;
 
-    const lock = await acquireLockWithRetry(context.env, `expenses::${group.id}`);
-    if (!lock) {
-      return Response.json(
-        { success: false, error: 'Another update is in progress — please retry' },
-        { status: 409 },
-      );
-    }
-    try {
-      const expenses = (await getExpenses(context.env, group.id)) as Expense[];
-
-      const index = expenses.findIndex((e) => e.id === id);
-      if (index === -1) {
+    {
+      const deletedExpense = await loadExpense(context.env, group.id, id);
+      if (!deletedExpense) {
         return Response.json(
           { success: false, error: 'Expense not found' },
           { status: 404 },
         );
       }
-
-      const deletedExpense = expenses[index];
       // Group admins may delete any expense; the creator or the payer may
       // delete their own.
       const creatorId = deletedExpense.createdBy ?? deletedExpense.paidBy;
@@ -269,14 +245,11 @@ export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
           { status: 403 },
         );
       }
-      expenses.splice(index, 1);
-      await saveExpenses(context.env, group.id, expenses);
+      await deleteExpenseRow(context.env, deletedExpense.id);
 
       context.waitUntil(sendEditNotification(context.env, group, deletedExpense, member.id, 'removed'));
 
       return Response.json({ success: true });
-    } finally {
-      await lock.release();
     }
   } catch (error) {
     return Response.json(
