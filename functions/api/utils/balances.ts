@@ -147,3 +147,23 @@ const EPSILON = 0.005; // half a cent — rounding noise threshold
 export function isBalanceClear(b: MemberBalance): boolean {
   return Math.abs(b.totalBalance) < EPSILON && Math.abs(b.pendingBalance) < EPSILON;
 }
+
+// Transactions still awaiting this member's acceptance. A zero-amount share
+// leaves the balance clear, so acceptance must be checked separately from
+// isBalanceClear before a member leaves or an account is deleted.
+export function unacceptedCountFor(
+  expenses: { splitType?: string; tags?: string[]; splits?: { memberId: string; signedOff?: boolean }[]; signedOffBy?: { memberId: string }[] }[],
+  memberId: string,
+): number {
+  let count = 0;
+  for (const e of expenses) {
+    if (e.tags?.includes('deleted')) continue;
+    if (e.splitType === 'group') {
+      const isMemberOfSplit = true; // group mode includes every active member
+      if (isMemberOfSplit && !(e.signedOffBy ?? []).some((s) => s.memberId === memberId)) count++;
+      continue;
+    }
+    if ((e.splits ?? []).some((s) => s.memberId === memberId && !s.signedOff)) count++;
+  }
+  return count;
+}

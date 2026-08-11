@@ -4,7 +4,7 @@ import { requireSession } from '../utils/session';
 import { getTokenFromCookies, verifyToken, deleteSession, clearAuthCookie } from '../utils/jwt';
 import { getMemberships, removeMembership } from '../utils/users';
 import { getGroup, softRemoveMember, getExpenses } from '../utils/groups';
-import { calculateBalances, isBalanceClear } from '../utils/balances';
+import { calculateBalances, isBalanceClear, unacceptedCountFor } from '../utils/balances';
 
 // DELETE /api/auth/account — permanently delete the caller's account.
 // For each group the user belongs to the member row is soft-removed so
@@ -28,7 +28,8 @@ export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
       const expenses = await getExpenses(env, m.groupId);
       const balances = calculateBalances(expenses, group.members);
       const mine = balances.find((b) => b.memberId === m.memberId);
-      if (mine && !isBalanceClear(mine)) {
+      const pendingAcceptance = unacceptedCountFor(expenses as [], m.memberId);
+      if ((mine && !isBalanceClear(mine)) || pendingAcceptance > 0) {
         unclean.push(group.name);
       }
     }
@@ -36,7 +37,7 @@ export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
       return Response.json(
         {
           success: false,
-          error: `Cannot delete account: you have unsettled balances in ${unclean.join(', ')}. Settle all balances first.`,
+          error: `Cannot delete account: you have unsettled balances or transactions awaiting your acceptance in ${unclean.join(', ')}. Settle and accept everything first.`,
         },
         { status: 400 }
       );

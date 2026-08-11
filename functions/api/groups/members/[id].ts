@@ -2,7 +2,7 @@ import type { AuthEnv } from '../../types/auth';
 import { requireGroup, requireGroupAdmin } from '../../utils/session';
 import { softRemoveMember, findMember, saveGroup, getExpenses } from '../../utils/groups';
 import { removeMembership } from '../../utils/users';
-import { calculateBalances, isBalanceClear } from '../../utils/balances';
+import { calculateBalances, isBalanceClear, unacceptedCountFor } from '../../utils/balances';
 
 // PATCH /api/groups/members/:id — admin edits per-member settings.
 // Currently only share (the "Split" weight). Passing null/undefined or 0
@@ -94,8 +94,11 @@ export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
     const expenses = await getExpenses(context.env, group.id);
     const balances = calculateBalances(expenses, group.members);
     const memberBalance = balances.find((b) => b.memberId === memberId);
-    if (memberBalance && !isBalanceClear(memberBalance)) {
-      const detail = memberBalance.pendingBalance !== 0
+    const unaccepted = unacceptedCountFor(expenses as [], memberId);
+    if ((memberBalance && !isBalanceClear(memberBalance)) || unaccepted > 0) {
+      const detail = unaccepted > 0
+        ? `They have ${unaccepted} transaction(s) awaiting acceptance.`
+        : memberBalance && memberBalance.pendingBalance !== 0
         ? 'They have pending transactions that must be settled first.'
         : 'They have an outstanding balance that must be settled first.';
       return Response.json(

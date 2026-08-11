@@ -287,6 +287,7 @@ const getMemberName = (id: string, members: Member[]) =>
                         currency={group.currency}
                         showSignOff={canSignOff}
                         initialExpanded={expense.id === expandId}
+                        highlight={expense.id === expandId}
                         swipeHint={expense.id === groupedExpenses[0]?.expenses[0]?.id}
                       />
                     </div>

@@ -3,7 +3,7 @@ import { requireGroupAdmin } from '../utils/session';
 import { LEGACY_GROUP_ID, getExpenses } from '../utils/groups';
 import { removeMembership } from '../utils/users';
 import { listGroupInvites, deleteInvite } from '../utils/invites';
-import { calculateBalances, isBalanceClear } from '../utils/balances';
+import { calculateBalances, isBalanceClear, unacceptedCountFor } from '../utils/balances';
 
 // Legacy group uses bare keys; all others use namespaced keys.
 function groupKvKey(groupId: string) {
@@ -35,7 +35,9 @@ export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
     // Refuse to delete a group that has any outstanding or pending balances.
     const expenses = await getExpenses(env, groupId);
     const balances = calculateBalances(expenses, group.members);
-    const dirty = balances.filter((b) => !isBalanceClear(b));
+    const dirty = balances.filter(
+      (b) => !isBalanceClear(b) || unacceptedCountFor(expenses as [], b.memberId) > 0,
+    );
     if (dirty.length > 0) {
       const names = dirty
         .map((b) => group.members.find((m) => m.id === b.memberId)?.name ?? b.memberId)
@@ -43,7 +45,7 @@ export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
       return Response.json(
         {
           success: false,
-          error: `Cannot delete group: ${dirty.length} member(s) have unsettled balances (${names}). Settle all balances first.`,
+          error: `Cannot delete group: ${dirty.length} member(s) have unsettled balances or unaccepted transactions (${names}). Settle and accept everything first.`,
         },
         { status: 400 }
       );

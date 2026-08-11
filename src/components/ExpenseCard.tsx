@@ -16,6 +16,8 @@ interface ExpenseCardProps {
   initialExpanded?: boolean;
   /** One-time swipe-discovery nudge: briefly peeks the action column. */
   swipeHint?: boolean;
+  /** Flash a bright ring for ~1s (used when arriving from a deep link). */
+  highlight?: boolean;
 }
 
 export function ExpenseCard({
@@ -26,6 +28,7 @@ export function ExpenseCard({
   onDelete,
   initialExpanded = false,
   swipeHint = false,
+  highlight = false,
 }: ExpenseCardProps) {
   const { group, currentUser, updateExpense, claimExpenseItem, deleteExpense, tagsByFrequency } = useApp();
   const navigate = useNavigate();
@@ -174,6 +177,16 @@ export function ExpenseCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [swipeHint, actionWidth]);
 
+  // Deep-link arrival flash: bright ring for ~1s, then back to normal. The
+  // 700ms transition on the card class does the fade-out.
+  const [highlighted, setHighlighted] = useState(highlight);
+  useEffect(() => {
+    if (!highlight) return;
+    setHighlighted(true);
+    const t = setTimeout(() => setHighlighted(false), 1000);
+    return () => clearTimeout(t);
+  }, [highlight]);
+
   const handleCardClick = () => {
     if (swipedRef.current) {
       swipedRef.current = false;
@@ -248,17 +261,19 @@ export function ExpenseCard({
           ? { transform: `translateX(${swipeX}px)`, transition: dragging ? 'none' : 'transform 200ms ease' }
           : {}),
       }}
-      className={`${dragging ? 'select-none ' : ''}relative bg-gray-800 rounded-lg shadow-sm border p-4 cursor-pointer transition-all duration-150 ${
+      className={`${dragging ? 'select-none ' : ''}relative bg-gray-800 rounded-lg shadow-sm border p-4 cursor-pointer transition-all ${highlighted ? 'duration-150' : 'duration-700'} ${
         // Pending (yellow) outranks the type colors — an unaccepted
-        // settlement is still pending first, cyan second.
+        // settlement is still pending first, cyan second. Hover only
+        // brightens the border and spreads a shadow; no lift, which would
+        // clip against the swipe container's overflow.
         expenseDeleted
-          ? 'border-gray-700 hover:shadow-[0_0_0_1px_rgba(55,65,81,0.45),0_10px_30px_rgba(55,65,81,0.12)]'
+          ? 'border-gray-700 hover:border-gray-500 hover:shadow-[0_0_18px_rgba(55,65,81,0.35)]'
           : !allSigned
-          ? 'border-yellow-700 hover:shadow-[0_0_0_1px_rgba(161,98,7,0.45),0_10px_30px_rgba(161,98,7,0.14)]'
+          ? 'border-yellow-700 hover:border-yellow-400 hover:shadow-[0_0_18px_rgba(202,138,4,0.35)]'
           : isSettlement
-          ? 'border-cyan-600 hover:shadow-[0_0_0_1px_rgba(8,145,178,0.5),0_10px_30px_rgba(8,145,178,0.18)]'
-          : 'border-gray-500 hover:shadow-[0_0_0_1px_rgba(107,114,128,0.5),0_10px_30px_rgba(107,114,128,0.14)]'
-      } hover:-translate-y-0.5 ${expenseDeleted ? 'opacity-60' : ''}`}
+          ? 'border-cyan-600 hover:border-cyan-300 hover:shadow-[0_0_18px_rgba(8,145,178,0.4)]'
+          : 'border-gray-500 hover:border-gray-300 hover:shadow-[0_0_18px_rgba(156,163,175,0.3)]'
+      } ${highlighted ? 'ring-2 ring-cyan-300 shadow-[0_0_22px_rgba(103,232,249,0.55)]' : ''} ${expenseDeleted ? 'opacity-60' : ''}`}
     >
       <div className="flex justify-between items-start mb-2">
         <div className="flex-1">

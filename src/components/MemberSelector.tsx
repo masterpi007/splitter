@@ -268,11 +268,20 @@ export function MemberSelector() {
         </div>
       </AuthModal>
 
-      <AuthModal isOpen={authFlow === 'signin' && !!webAuthnError} onClose={handleCloseModal}>
+      {/* Sign-in gets the same backdrop treatment as registration: a modal
+          for the whole flow, not only for the failure case. */}
+      <AuthModal isOpen={authFlow === 'signin'} onClose={handleCloseModal}>
         <div className="p-6">
           <div className="text-center">
             <div className="text-4xl mb-4">🔐</div>
-            <h2 className="text-xl font-semibold text-gray-100 mb-2">Sign In Failed</h2>
+            <h2 className="text-xl font-semibold text-gray-100 mb-2">
+              {webAuthnError ? 'Sign In Failed' : 'Sign In'}
+            </h2>
+            <p className="text-gray-400 mb-6 text-sm">
+              {webAuthnError
+                ? 'Something went wrong with your passkey.'
+                : 'Confirm with your passkey to continue.'}
+            </p>
 
             {webAuthnError && (
               <div className="mb-4 p-3 bg-red-900/30 border border-red-700 rounded-lg">
@@ -292,7 +301,7 @@ export function MemberSelector() {
                 disabled={webAuthnLoading}
                 className="flex-1 px-4 py-2 bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 disabled:opacity-50"
               >
-                Try Again
+                {webAuthnLoading ? 'Signing in…' : webAuthnError ? 'Try Again' : 'Continue'}
               </button>
             </div>
           </div>
