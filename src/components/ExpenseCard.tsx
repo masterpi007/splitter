@@ -142,7 +142,6 @@ export function ExpenseCard({
     touchStart.current = { x: e.clientX, y: e.clientY };
     startOffset.current = swipeX;
     swipedRef.current = false;
-    setDragging(true);
   };
   const onPointerMove = (e: React.PointerEvent) => {
     if (!touchStart.current) return;
@@ -151,6 +150,7 @@ export function ExpenseCard({
     if (!swipedRef.current && Math.abs(dy) > Math.abs(dx)) return; // vertical scroll wins
     if (Math.abs(dx) > 8 && !swipedRef.current) {
       swipedRef.current = true;
+      setDragging(true);
       e.currentTarget.setPointerCapture(e.pointerId);
     }
     setSwipeX(Math.min(0, Math.max(-actionWidth, startOffset.current + dx)));
@@ -285,12 +285,12 @@ export function ExpenseCard({
         // border, lifts the background a step, and spreads a glow; no
         // translate, which would clip against the swipe container's overflow.
         expenseDeleted
-          ? 'bg-gray-800 border-gray-800 hover:border-gray-600 hover:bg-gray-700/60 hover:shadow-[0_0_18px_rgba(55,65,81,0.4)]'
+          ? 'bg-gray-800 border-gray-800 hover:border-gray-600 hover:bg-gray-700 hover:shadow-[0_0_18px_rgba(55,65,81,0.4)]'
           : !allSigned
-          ? 'bg-gray-800 border-yellow-800 hover:border-yellow-500 hover:bg-gray-700/60 hover:shadow-[0_0_18px_rgba(202,138,4,0.4)]'
+          ? 'bg-gray-800 border-yellow-800 hover:border-yellow-500 hover:bg-gray-700 hover:shadow-[0_0_18px_rgba(202,138,4,0.4)]'
           : isSettlement
-          ? 'bg-cyan-950/40 border-cyan-800 hover:border-cyan-400 hover:bg-cyan-900/40 hover:shadow-[0_0_18px_rgba(8,145,178,0.45)]'
-          : 'bg-gray-800 border-gray-700 hover:border-gray-400 hover:bg-gray-700/60 hover:shadow-[0_0_18px_rgba(156,163,175,0.35)]'
+          ? 'bg-[#0c2a33] border-cyan-800 hover:border-cyan-400 hover:bg-[#0f3742] hover:shadow-[0_0_18px_rgba(8,145,178,0.45)]'
+          : 'bg-gray-800 border-gray-700 hover:border-gray-400 hover:bg-gray-700 hover:shadow-[0_0_18px_rgba(156,163,175,0.35)]'
       } ${expenseDeleted ? 'opacity-60' : ''}`}
     >
       <div className="flex justify-between items-start mb-2">
