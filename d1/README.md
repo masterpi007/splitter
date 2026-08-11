@@ -13,14 +13,21 @@ not migrated.
 
 ## Creating the database
 
+One database holds everything — all groups, members, expenses, users and
+passkeys. Creating a group later is an ordinary `INSERT` the app makes; none
+of this is repeated per group.
+
 ```sh
 npx wrangler d1 create chia                     # once; note the database_id
 npx wrangler d1 execute chia --remote --file=d1/schema.sql
 ```
 
+Current database: **`chia`** — `e721391e-d0ca-4ad3-8208-245c18083e0d`.
+
 Then bind it in the Cloudflare dashboard (Pages project → Settings →
-Bindings → D1): variable name `DB`, database `chia`. The dashboard is the
-source of truth for bindings because `wrangler.toml` is untracked.
+Bindings → D1) as variable name `DB`, for **both** Production and Preview.
+The dashboard is the source of truth for bindings because `wrangler.toml` is
+untracked. Keep `SPLITTER_KV` bound as well until Telegram storage moves too.
 
 Without an API token, both steps can also be done from the dashboard's D1
 console by pasting `d1/schema.sql`.

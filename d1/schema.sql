@@ -12,7 +12,8 @@
 --   * ephemeral records carry expires_at and are swept lazily on read plus by
 --     a scheduled sweep; SQLite has no TTL of its own
 
-PRAGMA foreign_keys = ON;
+-- No `PRAGMA foreign_keys = ON` here: D1 enforces foreign keys on every
+-- query and migration already, and user queries cannot change the setting.
 
 -- ---------------------------------------------------------------- identity --
 
