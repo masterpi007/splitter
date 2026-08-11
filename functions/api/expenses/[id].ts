@@ -12,7 +12,7 @@ import {
   type Expense,
 } from '../utils/groups';
 import { notifyMembers as notifyPush } from '../utils/web-push';
-import { notifyMembers as notifyTelegram, sendDebouncedEditNotification, createCallbackData } from '../utils/telegram';
+import { notifyMembers as notifyTelegram, sendDebouncedEditNotification, createCallbackData, sendTelegramNotification } from '../utils/telegram';
 import { loadExpense, writeExpense, deleteExpenseRow } from '../utils/db';
 
 // Fields that rewrite the "truth" of an expense (amount, attribution). Only
@@ -46,6 +46,29 @@ function diffExpenseForHistory(before: Expense, after: Expense) {
 }
 
 const HISTORY_CAP = 50;
+
+// Accepting your share goes through the same PUT as a real edit, so without
+// this every sign-off notified the whole group that the expense was
+// "updated". True when nothing changed except acceptance state.
+function isAcceptanceOnlyChange(before: Expense, after: Expense): boolean {
+  if (diffExpenseForHistory(before, after).length > 0) return false;
+
+  const beforeItems = ((before as any).items ?? []) as { id: string; description?: string; amount: number; memberId?: string }[];
+  const afterItems = ((after as any).items ?? []) as typeof beforeItems;
+  if (beforeItems.length !== afterItems.length) return false;
+  const itemsById = new Map(beforeItems.map((i) => [i.id, i]));
+  for (const item of afterItems) {
+    const b = itemsById.get(item.id);
+    if (!b) return false;
+    if (b.amount !== item.amount || b.description !== item.description || b.memberId !== item.memberId) {
+      return false;
+    }
+  }
+
+  const beforeTags = [...(before.tags ?? [])].sort().join(',');
+  const afterTags = [...(after.tags ?? [])].sort().join(',');
+  return beforeTags === afterTags;
+}
 
 function structuralFieldsChanged(before: Expense, after: Expense): boolean {
   return (
@@ -225,6 +248,54 @@ async function sendEditNotification(
   }
 }
 
+// A settlement is "the money arrived" rather than "I acknowledge a bill", so
+// its confirmation is the one acceptance worth notifying — and only the payer,
+// who is waiting to know. The Telegram confirm button already did this; this
+// covers confirming in the app.
+async function sendSettlementAccepted(
+  env: AuthEnv,
+  group: GroupRecord,
+  expense: Expense,
+  receiverMemberId: string,
+): Promise<void> {
+  const payer = findMember(group, expense.paidBy);
+  if (!payer || payer.id === receiverMemberId) return;
+  const receiverName = getMemberName(group, receiverMemberId);
+  const body = `${receiverName} confirmed receiving your payment`;
+
+  try {
+    await notifyPush(env, group, [payer.id], {
+      title: 'Settlement confirmed',
+      body,
+      url: `/tx/${expense.id}`,
+      tag: `expense-${expense.id}`,
+    }, 'settlementAccepted');
+  } catch (err) {
+    console.error('Failed to send push notifications:', err);
+  }
+
+  try {
+    if (payer.userId) {
+      await sendTelegramNotification(
+        payer.userId,
+        'settlementAccepted',
+        `✅ <b>${receiverName}</b> confirmed receiving your payment\n\n💰 Amount: <b>${formatAmount(expense.amount, group.currency)}</b>\n📝 Note: ${expense.description}`,
+        env,
+      );
+    }
+  } catch (err) {
+    console.error('Failed to send Telegram notifications:', err);
+  }
+}
+
+// True when this edit is the settlement recipient confirming receipt.
+function isSettlementConfirmation(before: Expense, after: Expense, actorId: string): boolean {
+  if (after.splitType !== 'settlement') return false;
+  const was = before.splits?.find((s) => s.memberId === actorId);
+  const now = after.splits?.find((s) => s.memberId === actorId);
+  return !!was && !!now && !was.signedOff && now.signedOff;
+}
+
 export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
   try {
     const ctx = await requireGroup(context.env, context.request);
@@ -279,10 +350,20 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
       const updatedExpense = merged;
       await writeExpense(context.env, group.id, merged);
 
-      const isDeleted = updatedExpense.tags?.includes('deleted');
-      context.waitUntil(
-        sendEditNotification(context.env, group, updatedExpense, member.id, isDeleted ? 'removed' : 'updated'),
-      );
+      // Creates, edits and deletes are worth interrupting people for;
+      // someone accepting their own share is not.
+      if (isAcceptanceOnlyChange(before, merged)) {
+        if (isSettlementConfirmation(before, merged, member.id)) {
+          context.waitUntil(
+            sendSettlementAccepted(context.env, group, merged, member.id),
+          );
+        }
+      } else {
+        const isDeleted = updatedExpense.tags?.includes('deleted');
+        context.waitUntil(
+          sendEditNotification(context.env, group, updatedExpense, member.id, isDeleted ? 'removed' : 'updated'),
+        );
+      }
 
       return Response.json({ success: true, data: updatedExpense });
     }
