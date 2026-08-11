@@ -4,9 +4,10 @@ import { useApp } from '../context/AppContext';
 import { ReceiptItems } from '../components/ReceiptItems';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ReceiptItem, DiscountType } from '../types';
-import { roundNumber, calculateDiscountAmount, calculateBillGoc, distributeByShares, toLocalDatetimeInput, parseDatetimeLocal, parseDecimal, sanitizeDecimalInput } from '../utils/balances';
+import { roundNumber, calculateDiscountAmount, calculateBillGoc, distributeByShares, toLocalDatetimeInput, parseDatetimeLocal, parseDecimal } from '../utils/balances';
 import { YouBadge } from '../components/YouBadge';
 import { ShareControl } from '../components/ShareControl';
+import { AmountInput } from '../components/AmountInput';
 
 export function EditExpense() {
   const navigate = useNavigate();
@@ -655,21 +656,14 @@ export function EditExpense() {
         <div>
           <div className="flex items-center bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
             <span className="px-3 py-2 text-sm text-gray-500 border-r border-gray-700 whitespace-nowrap">Total</span>
-            <input
-              type="text" inputMode="decimal"
-              value={totalAmount || ''}
+            <AmountInput
+              value={totalAmount || undefined}
               disabled={canOnlyAssign || canOnlyEditOwnItems}
-              onChange={(e) => {
-                const sanitized = sanitizeDecimalInput(e.target.value);
+              onCommit={(n) => {
                 if (splitMode === 'shares') {
-                  const parsed = parseDecimal(sanitized);
-                  if (!isNaN(parsed) && parsed >= 0) {
-                    setTotalAmount(parsed);
-                  } else if (sanitized === '' || sanitized === '0') {
-                    setTotalAmount(0);
-                  }
-                } else {
-                  handleTotalChange(sanitized);
+                  setTotalAmount(n !== null && n >= 0 ? n : 0);
+                } else if (n !== null) {
+                  handleTotalChange(String(n));
                 }
               }}
               placeholder="0"
@@ -696,13 +690,11 @@ export function EditExpense() {
           {splitMode === 'items' && totalAmount > 0 && !canOnlyAssign && !canOnlyEditOwnItems && (showDiscountInput || discount) && (
             <div className="flex items-center bg-gray-800 border border-gray-700 rounded-lg overflow-hidden mt-2">
               <span className="px-3 py-2 text-sm text-gray-500 border-r border-gray-700 whitespace-nowrap">Discount</span>
-              <input
-                type="text" inputMode="decimal"
+              <AmountInput
                 autoFocus
-                value={discount || ''}
-                onChange={(e) => {
-                  const sanitized = sanitizeDecimalInput(e.target.value);
-                  const raw = sanitized ? parseDecimal(sanitized) : undefined;
+                value={discount}
+                onCommit={(n) => {
+                  const raw = n ?? undefined;
                   const next = discountType === 'flat'
                     ? (raw && raw > 0 ? raw : undefined)
                     : (raw && raw > 0 && raw <= 100 ? raw : undefined);

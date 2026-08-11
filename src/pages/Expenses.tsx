@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { ExpenseCard } from '../components/ExpenseCard';
-import { getDateKey, formatDateHeader, getTagColor, isDeleted } from '../utils/balances';
+import { getDateKey, formatDateHeader, getTagColor, isDeleted, formatCurrency } from '../utils/balances';
 import { Expense, Member } from '../types';
 
 export function Expenses() {
@@ -278,8 +278,17 @@ const getMemberName = (id: string, members: Member[]) =>
         <div className="space-y-6">
           {groupedExpenses.map(({ dateKey, expenses: dayExpenses }) => (
             <div key={dateKey}>
-              <h3 className="text-sm font-medium text-gray-400 mb-3">
-                {formatDateHeader(dateKey)}
+              <h3 className="flex items-baseline justify-between text-sm font-medium text-gray-400 mb-3">
+                <span>{formatDateHeader(dateKey)}</span>
+                {/* Day total: spending only — settlements are transfers, not expenses */}
+                <span className="text-gray-500">
+                  {formatCurrency(
+                    dayExpenses
+                      .filter((e) => e.splitType !== 'settlement')
+                      .reduce((sum, e) => sum + e.amount, 0),
+                    group.currency,
+                  )}
+                </span>
               </h3>
               <div className="space-y-3">
                 {dayExpenses.map((expense) => {

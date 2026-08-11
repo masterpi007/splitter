@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ReceiptItem, Member } from '../types';
 import { useApp } from '../context/AppContext';
-import { roundNumber, formatCurrency } from '../utils/balances';
+import { roundNumber, formatCurrency, evaluateAmountExpression, sanitizeAmountExpression } from '../utils/balances';
 
 interface ReceiptItemsProps {
   items: ReceiptItem[];
@@ -99,9 +99,10 @@ export function ReceiptItems({ items, members, currency, discountAmount, billGoc
 
   const handleAmountBlur = (itemId: string) => {
     if (editingId === itemId) {
-      const newAmount = parseFloat(editingValue) || 0;
+      // Accepts arithmetic ("12+3*2") as well as plain numbers.
+      const newAmount = evaluateAmountExpression(editingValue) ?? 0;
       onChange(items.map(item =>
-        item.id === itemId ? { ...item, amount: newAmount } : item
+        item.id === itemId ? { ...item, amount: Math.max(0, newAmount) } : item
       ));
       setEditingId(null);
       setEditingValue('');
@@ -109,8 +110,7 @@ export function ReceiptItems({ items, members, currency, discountAmount, billGoc
   };
 
   const handleAmountChange = (value: string) => {
-    const sanitized = value.replace(/[^0-9.,]/g, '').replace(',', '.');
-    setEditingValue(sanitized);
+    setEditingValue(sanitizeAmountExpression(value));
   };
 
   const handleDescriptionChange = (itemId: string, description: string) => {
@@ -203,7 +203,7 @@ export function ReceiptItems({ items, members, currency, discountAmount, billGoc
             <div className="flex items-center gap-1">
               <input
                 type="text"
-                inputMode="decimal"
+                inputMode="text"
                 value={isEditing ? editingValue : item.amount.toString()}
                 onChange={(e) => handleAmountChange(e.target.value)}
                 onFocus={() => handleAmountFocus(item.id, item.amount)}

@@ -37,11 +37,20 @@ export function Balances() {
           <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-center">
             <p className="text-gray-400">Add members to see balances</p>
           </div>
-        ) : (
-          <div className="space-y-3">
-            {sortedBalances
-              .filter((balance) => Math.round((balance.signedBalance + balance.pendingBalance) * 10) !== 0)
-              .map((balance) => {
+        ) : (() => {
+          const openBalances = sortedBalances.filter(
+            (balance) => Math.round((balance.signedBalance + balance.pendingBalance) * 10) !== 0,
+          );
+          if (openBalances.length === 0) {
+            return (
+              <div className="bg-green-900/30 border border-green-700 rounded-lg p-4 text-center">
+                <p className="text-green-200">🎉 All balances are settled — nobody owes anything</p>
+              </div>
+            );
+          }
+          return (
+            <div className="space-y-3">
+              {openBalances.map((balance) => {
                 // Find suggested settlement where this member is the payer
                 const suggestedSettlement = settlements.find(s => s.from === balance.memberId);
                 return (
@@ -54,8 +63,9 @@ export function Balances() {
                   />
                 );
               })}
-          </div>
-        )}
+            </div>
+          );
+        })()}
       </section>
 
       <section>

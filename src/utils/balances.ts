@@ -78,6 +78,68 @@ export function parseDecimal(raw: string): number {
 // the field reads naturally in mixed locales. Does not parse or validate —
 // leading/trailing separators and the empty string come through as-is
 // because the user may still be typing.
+// Keep only characters that can appear in an amount expression: digits,
+// decimal separators, + - * / ( ) and spaces. Companion to
+// evaluateAmountExpression — does not validate, the user may still be typing.
+export function sanitizeAmountExpression(raw: string): string {
+  return [...raw].filter((ch) => (ch >= '0' && ch <= '9') || '.,+-*/() '.includes(ch)).join('');
+}
+
+// Evaluate an amount expression like "12+3*2" or "(45-5)/4". Supports + - * /,
+// parentheses, unary minus, and '.' or ',' as the decimal separator. Returns
+// null while the expression is incomplete or invalid (including division by
+// zero), so callers can simply skip committing until it parses.
+export function evaluateAmountExpression(raw: string): number | null {
+  const s = raw.replace(/\s+/g, '').replace(/,/g, '.');
+  if (!s) return null;
+  let i = 0;
+
+  function parseFactor(): number | null {
+    if (s[i] === '(') {
+      i++;
+      const v = parseExpr();
+      if (v === null || s[i] !== ')') return null;
+      i++;
+      return v;
+    }
+    if (s[i] === '-') {
+      i++;
+      const v = parseFactor();
+      return v === null ? null : -v;
+    }
+    const start = i;
+    while (i < s.length && ((s[i] >= '0' && s[i] <= '9') || s[i] === '.')) i++;
+    if (i === start) return null;
+    const n = parseFloat(s.slice(start, i));
+    return isNaN(n) ? null : n;
+  }
+
+  function parseTerm(): number | null {
+    let v = parseFactor();
+    while (v !== null && (s[i] === '*' || s[i] === '/')) {
+      const op = s[i++];
+      const r = parseFactor();
+      if (r === null || (op === '/' && r === 0)) return null;
+      v = op === '*' ? v * r : v / r;
+    }
+    return v;
+  }
+
+  function parseExpr(): number | null {
+    let v = parseTerm();
+    while (v !== null && (s[i] === '+' || s[i] === '-')) {
+      const op = s[i++];
+      const r = parseTerm();
+      if (r === null) return null;
+      v = op === '+' ? v + r : v - r;
+    }
+    return v;
+  }
+
+  const result = parseExpr();
+  return result !== null && i === s.length && isFinite(result) ? result : null;
+}
+
 export function sanitizeDecimalInput(raw: string): string {
   let seenSep = false;
   let out = '';

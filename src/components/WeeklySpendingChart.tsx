@@ -39,15 +39,42 @@ export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser
   const [viewMode, setViewMode] = useState<ViewMode>('group');
   const [period, setPeriod] = useState<Period>('week');
   const [selected, setSelected] = useState<number>(-1);
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
 
+  // Tags available for filtering, most-used first ('deleted' is a system tag).
+  const availableTags = useMemo(() => {
+    const freq = new Map<string, number>();
+    for (const e of expenses) {
+      for (const t of e.tags ?? []) {
+        if (t !== 'deleted') freq.set(t, (freq.get(t) ?? 0) + 1);
+      }
+    }
+    return [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+  }, [expenses]);
+
+  const toggleTag = (tag: string) => {
+    setSelectedTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  };
+
+  // No selection = all expenses; otherwise an expense matches on ANY selected tag.
+  const filteredExpenses = useMemo(() => {
+    if (selectedTags.size === 0) return expenses;
+    return expenses.filter((e) => e.tags?.some((t) => selectedTags.has(t)));
+  }, [expenses, selectedTags]);
+
   const data = useMemo(() => {
-    if (period === 'day') return calculateDailySpending(expenses, currentUserId);
-    if (period === 'month') return calculateMonthlySpending(expenses, currentUserId);
-    return calculateWeeklySpending(expenses, currentUserId);
-  }, [expenses, currentUserId, period]);
+    if (period === 'day') return calculateDailySpending(filteredExpenses, currentUserId);
+    if (period === 'month') return calculateMonthlySpending(filteredExpenses, currentUserId);
+    return calculateWeeklySpending(filteredExpenses, currentUserId);
+  }, [filteredExpenses, currentUserId, period]);
 
   // Reset selection to last bucket when data changes.
   useEffect(() => {
@@ -77,7 +104,9 @@ export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser
     return () => observer.disconnect();
   }, [data.length]);
 
-  if (data.length === 0) {
+  // Only bail out entirely when the group truly has no spending — with a tag
+  // filter active we must keep rendering the chips so it can be cleared.
+  if (data.length === 0 && selectedTags.size === 0) {
     return (
       <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 text-center">
         <p className="text-gray-400">No spending yet</p>
@@ -111,8 +140,10 @@ export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser
       : '';
 
   const selIdx = selected >= 0 && selected < data.length ? selected : data.length - 1;
-  const selectedBucket = data[selIdx];
-  const selectedValue = effectiveMode === 'group' ? selectedBucket.groupTotal : selectedBucket.userShare;
+  const selectedBucket = data.length > 0 ? data[selIdx] : null;
+  const selectedValue = selectedBucket
+    ? (effectiveMode === 'group' ? selectedBucket.groupTotal : selectedBucket.userShare)
+    : 0;
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
@@ -146,6 +177,42 @@ export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser
         )}
       </div>
 
+      {availableTags.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1 mb-2 -mx-1 px-1">
+          {availableTags.map((tag) => {
+            const active = selectedTags.has(tag);
+            return (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => toggleTag(tag)}
+                className={`shrink-0 text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                  active
+                    ? 'bg-cyan-600 border-cyan-500 text-white'
+                    : 'bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-500'
+                }`}
+              >
+                {tag}
+              </button>
+            );
+          })}
+          {selectedTags.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedTags(new Set())}
+              className="shrink-0 text-xs px-2 py-0.5 rounded-full text-gray-500 hover:text-gray-300"
+            >
+              × clear
+            </button>
+          )}
+        </div>
+      )}
+
+      {data.length === 0 ? (
+        <div className="py-8 text-center text-sm text-gray-500">
+          No spending matches the selected tags
+        </div>
+      ) : (
       <div ref={viewportRef} className="overflow-x-auto">
         <div ref={scrollRef} className="w-full">
           <svg width={width} height={CHART_HEIGHT} className="block">
@@ -194,12 +261,15 @@ export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser
           </svg>
         </div>
       </div>
+      )}
 
-      <div className="mt-2 text-sm text-gray-300">
-        <span className="font-medium">{formatPeriodLabel(selectedBucket.weekStart, period)}</span>
-        <span className="text-gray-500"> · </span>
-        <span className="font-semibold text-cyan-300">{formatCurrency(selectedValue, currency)}</span>
-      </div>
+      {selectedBucket && (
+        <div className="mt-2 text-sm text-gray-300">
+          <span className="font-medium">{formatPeriodLabel(selectedBucket.weekStart, period)}</span>
+          <span className="text-gray-500"> · </span>
+          <span className="font-semibold text-cyan-300">{formatCurrency(selectedValue, currency)}</span>
+        </div>
+      )}
     </div>
   );
 }
