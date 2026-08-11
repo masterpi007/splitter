@@ -1,8 +1,9 @@
 import { KV_KEYS, DEFAULT_NOTIFY_PREFS, DEBOUNCE_NOTIFY_TTL_SECONDS, TELEGRAM_CALLBACK_TTL_SECONDS } from '../types/auth';
 import type { NotifyPrefs, TelegramData, TelegramCallbackData } from '../types/auth';
+import { getEphemeral, putEphemeral, getTelegramLink, deleteTelegramLink } from './db';
 
 interface TelegramEnv {
-  SPLITTER_KV: KVNamespace;
+  DB: D1Database;
   TELEGRAM_BOT_TOKEN: string;
 }
 
@@ -15,16 +16,20 @@ type InlineKeyboard = { inline_keyboard: Array<Array<{ text: string; callback_da
  * Telegram limits callback_data to 64 bytes; full UUID-based IDs exceed that.
  */
 export async function createCallbackData(
-  env: { SPLITTER_KV: KVNamespace },
+  env: { DB: D1Database },
   action: string,
   groupId: string,
   expenseId: string,
 ): Promise<string> {
   const token = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
   const data: TelegramCallbackData = { action, groupId, expenseId };
-  await env.SPLITTER_KV.put(KV_KEYS.telegramCallback(token), JSON.stringify(data), {
-    expirationTtl: TELEGRAM_CALLBACK_TTL_SECONDS,
-  });
+  await putEphemeral(
+    env as never,
+    KV_KEYS.telegramCallback(token),
+    'tg_callback',
+    data,
+    TELEGRAM_CALLBACK_TTL_SECONDS,
+  );
   return `cb:${token}`;
 }
 
@@ -33,13 +38,13 @@ export async function createCallbackData(
  * legacy `action:groupId:expenseId` format (for short IDs like the 1matrix group).
  */
 export async function resolveCallback(
-  env: { SPLITTER_KV: KVNamespace },
+  env: { DB: D1Database },
   data: string,
   legacyGroupId: string,
 ): Promise<{ action: string; groupId: string; expenseId: string } | null> {
   if (data.startsWith('cb:')) {
     const token = data.slice(3);
-    return env.SPLITTER_KV.get<TelegramCallbackData>(KV_KEYS.telegramCallback(token), 'json');
+    return getEphemeral<TelegramCallbackData>(env as never, KV_KEYS.telegramCallback(token));
   }
   const parts = data.split(':');
   if (parts.length >= 3) return { action: parts[0], groupId: parts[1], expenseId: parts[2] };
@@ -58,20 +63,11 @@ export async function sendTelegramNotification(
   env: TelegramEnv,
   inlineKeyboard?: InlineKeyboard,
 ): Promise<void> {
-  const data = await env.SPLITTER_KV.get<TelegramData>(KV_KEYS.telegram(userId), 'json');
+  const data = await getTelegramLink(env as never, userId);
   if (!data) return;
 
-  // Cross-check: verify this chatId still belongs to this userId.
-  const ownerOfChat = await env.SPLITTER_KV.get(KV_KEYS.telegramChatId(data.chatId));
-  if (ownerOfChat === null) {
-    // Reverse mapping missing (connected before it was introduced) — backfill and continue.
-    await env.SPLITTER_KV.put(KV_KEYS.telegramChatId(data.chatId), userId);
-  } else if (ownerOfChat !== userId) {
-    // ChatId actively claimed by a different user — this entry is stale, remove it.
-    await env.SPLITTER_KV.delete(KV_KEYS.telegram(userId));
-    return;
-  }
-
+  // The chat_id unique index makes the old reverse-mapping cross-check
+  // unnecessary: one chat cannot be linked to two users in the first place.
   const prefs = data.notifyPrefs ?? DEFAULT_NOTIFY_PREFS;
   if (!prefs[event]) return;
 
@@ -90,8 +86,7 @@ export async function sendTelegramNotification(
 
   if (res.status === 403) {
     // Bot was blocked — clean up connection
-    await env.SPLITTER_KV.delete(KV_KEYS.telegramChatId(data.chatId));
-    await env.SPLITTER_KV.delete(KV_KEYS.telegram(userId));
+    await deleteTelegramLink(env as never, userId);
   }
 }
 
@@ -123,10 +118,10 @@ export async function sendDebouncedEditNotification(
   inlineKeyboard?: InlineKeyboard,
 ): Promise<boolean> {
   const debounceKey = KV_KEYS.debounceNotify(expenseId);
-  const existing = await env.SPLITTER_KV.get(debounceKey);
+  const existing = await getEphemeral<{ held: true }>(env as never, debounceKey);
   if (existing) return false;
 
-  await env.SPLITTER_KV.put(debounceKey, '1', { expirationTtl: DEBOUNCE_NOTIFY_TTL_SECONDS });
+  await putEphemeral(env as never, debounceKey, 'debounce', { held: true }, DEBOUNCE_NOTIFY_TTL_SECONDS);
   await notifyMembers(userIds, excludeUserId, 'expenseEdited', text, env, inlineKeyboard);
   return true;
 }

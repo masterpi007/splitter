@@ -18,6 +18,7 @@ export function GroupManager() {
   const [invitesError, setInvitesError] = useState<string | null>(null);
   // Invite code whose QR panel is expanded (only one at a time).
   const [qrCode, setQrCode] = useState<string | null>(null);
+  const [newMemberName, setNewMemberName] = useState('');
   const [friends, setFriends] = useState<FriendCandidate[] | null>(null);
   const [friendsError, setFriendsError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -253,6 +254,41 @@ export function GroupManager() {
           {isAdmin && (
             <p className="text-xs text-gray-500 mt-0.5">
               Share weights the "Split" method. Blank = 1 (equal).
+            </p>
+          )}
+          {isAdmin && (
+            <form
+              className="mt-3 flex items-center gap-2"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const name = newMemberName.trim();
+                if (!name) return;
+                const updated = await wrap('add-member', () => api.addPlaceholderMember(name));
+                if (updated) {
+                  setNewMemberName('');
+                  syncGroupLocal(updated);
+                }
+              }}
+            >
+              <input
+                value={newMemberName}
+                onChange={(e) => setNewMemberName(e.target.value)}
+                placeholder="Add someone by name"
+                className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-100"
+              />
+              <button
+                type="submit"
+                disabled={!newMemberName.trim() || busy === 'add-member'}
+                className="text-sm px-3 py-1.5 rounded-lg bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50"
+              >
+                {busy === 'add-member' ? 'Adding…' : 'Add'}
+              </button>
+            </form>
+          )}
+          {isAdmin && (
+            <p className="text-xs text-gray-500 mt-1.5">
+              They can be included in expenses right away. When they later open an
+              invite link and use the same name, this row becomes their account.
             </p>
           )}
         </div>

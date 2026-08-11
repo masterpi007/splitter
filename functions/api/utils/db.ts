@@ -512,14 +512,15 @@ export async function getTelegramLink(
   userId: string,
 ): Promise<TelegramData | null> {
   const row = await env.DB.prepare(
-    `SELECT t.chat_id, t.telegram_name FROM telegram_links t WHERE t.user_id = ?`,
+    `SELECT chat_id, telegram_name, notify_prefs FROM telegram_links WHERE user_id = ?`,
   )
     .bind(userId)
-    .first<{ chat_id: string; telegram_name: string | null }>();
+    .first<{ chat_id: string; telegram_name: string | null; notify_prefs: string | null }>();
   if (!row) return null;
   return {
     chatId: row.chat_id,
     telegramName: row.telegram_name ?? undefined,
+    notifyPrefs: row.notify_prefs ? JSON.parse(row.notify_prefs) : undefined,
   } as TelegramData;
 }
 
@@ -529,11 +530,19 @@ export async function saveTelegramLink(
   data: TelegramData,
 ): Promise<void> {
   await env.DB.prepare(
-    `INSERT INTO telegram_links (user_id, chat_id, telegram_name, linked_at) VALUES (?, ?, ?, ?)
+    `INSERT INTO telegram_links (user_id, chat_id, telegram_name, notify_prefs, linked_at)
+     VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET chat_id = excluded.chat_id,
-                                        telegram_name = excluded.telegram_name`,
+                                        telegram_name = excluded.telegram_name,
+                                        notify_prefs = excluded.notify_prefs`,
   )
-    .bind(userId, data.chatId, data.telegramName ?? null, new Date().toISOString())
+    .bind(
+      userId,
+      data.chatId,
+      data.telegramName ?? null,
+      data.notifyPrefs ? JSON.stringify(data.notifyPrefs) : null,
+      new Date().toISOString(),
+    )
     .run();
 }
 
@@ -566,4 +575,18 @@ export async function deleteExpenseRow(env: AuthEnv, id: string): Promise<void> 
 export async function loadExpense(env: AuthEnv, groupId: string, id: string): Promise<Expense | null> {
   const all = await loadExpenses(env, groupId);
   return all.find((e) => e.id === id) ?? null;
+}
+
+// Free a chat for a new owner. Deletes any link on that chat that belongs to
+// someone else, so the unique index cannot reject the incoming upsert.
+export async function deleteTelegramLinkByChat(
+  env: TelegramEnvDb,
+  chatId: string,
+  exceptUserId: string,
+): Promise<void> {
+  await env.DB.prepare(
+    `DELETE FROM telegram_links WHERE chat_id = ? AND user_id <> ?`,
+  )
+    .bind(chatId, exceptUserId)
+    .run();
 }

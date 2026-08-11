@@ -169,6 +169,16 @@ export async function addFriendToGroup(
   });
 }
 
+// Add someone who has no account yet. Creates a placeholder member the
+// invite flow later claims by name, so expenses can be split with them
+// immediately.
+export async function addPlaceholderMember(name: string): Promise<Group> {
+  return fetchApi<Group>('/groups/members', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+}
+
 // --- Invites ---
 
 export async function listInvites(): Promise<GroupInvite[]> {

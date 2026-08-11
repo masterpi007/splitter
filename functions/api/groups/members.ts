@@ -15,15 +15,39 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     if (ctx instanceof Response) return ctx;
     const { session, group } = ctx;
 
-    const { userId, displayName } = await context.request.json() as {
+    const { userId, displayName, name } = await context.request.json() as {
       userId?: string;
       displayName?: string;
+      name?: string;
     };
+
+    // Placeholder branch: an admin can add someone by name before they have
+    // an account. The row carries no userId; the invite flow claims it by
+    // name when that person signs up, so their history stays attached.
     if (!userId) {
-      return Response.json(
-        { success: false, error: 'userId is required' },
-        { status: 400 }
+      const placeholderName = name?.trim();
+      if (!placeholderName) {
+        return Response.json(
+          { success: false, error: 'userId or name is required' },
+          { status: 400 }
+        );
+      }
+      const clash = [...group.members, ...group.removedMembers].some(
+        (m) => !m.removedAt && m.name.toLowerCase() === placeholderName.toLowerCase(),
       );
+      if (clash) {
+        return Response.json(
+          { success: false, error: 'A member with that name already exists' },
+          { status: 400 }
+        );
+      }
+      group.members.push({
+        id: crypto.randomUUID(),
+        name: placeholderName,
+        joinedAt: new Date().toISOString(),
+      });
+      await saveGroup(context.env, group);
+      return Response.json({ success: true, data: group });
     }
 
     // Friendship gate: caller and target share a group.

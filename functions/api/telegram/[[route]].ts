@@ -15,9 +15,10 @@ import {
   findMember,
 } from '../utils/groups';
 import { getMemberships } from '../utils/users';
+import { getEphemeral, putEphemeral, deleteEphemeral, getTelegramLink, saveTelegramLink, deleteTelegramLink, deleteTelegramLinkByChat, findTelegramUserByChat } from '../utils/db';
 
 interface Env {
-  SPLITTER_KV: KVNamespace;
+  DB: D1Database;
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_WEBHOOK_SECRET: string;
   JWT_SECRET: string;
@@ -53,9 +54,13 @@ async function handleConnect(request: Request, env: Env): Promise<Response> {
     userId,
     expiresAt: new Date(Date.now() + TELEGRAM_CONNECT_TTL_SECONDS * 1000).toISOString(),
   };
-  await env.SPLITTER_KV.put(KV_KEYS.telegramConnect(token), JSON.stringify(payload), {
-    expirationTtl: TELEGRAM_CONNECT_TTL_SECONDS,
-  });
+  await putEphemeral(
+    env as never,
+    KV_KEYS.telegramConnect(token),
+    'tg_connect',
+    payload,
+    TELEGRAM_CONNECT_TTL_SECONDS,
+  );
 
   const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getMe`);
   const me = await res.json() as { result?: { username?: string } };
@@ -71,9 +76,7 @@ async function handleDisconnect(request: Request, env: Env): Promise<Response> {
   const userId = await getUserIdFromJWT(request, env);
   if (!userId) return Response.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
-  const data = await env.SPLITTER_KV.get<TelegramData>(KV_KEYS.telegram(userId), 'json');
-  if (data) await env.SPLITTER_KV.delete(KV_KEYS.telegramChatId(data.chatId));
-  await env.SPLITTER_KV.delete(KV_KEYS.telegram(userId));
+  await deleteTelegramLink(env as never, userId);
 
   return Response.json({ success: true });
 }
@@ -82,7 +85,7 @@ async function handleStatus(request: Request, env: Env): Promise<Response> {
   const userId = await getUserIdFromJWT(request, env);
   if (!userId) return Response.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
-  const data = await env.SPLITTER_KV.get<TelegramData>(KV_KEYS.telegram(userId), 'json');
+  const data = await getTelegramLink(env as never, userId);
   return Response.json({
     success: true,
     data: { connected: !!data, notifyPrefs: data?.notifyPrefs ?? null, telegramName: data?.telegramName ?? null },
@@ -94,14 +97,14 @@ async function handlePreferences(request: Request, env: Env): Promise<Response> 
   if (!userId) return Response.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
   const updates = await request.json() as Partial<NotifyPrefs>;
-  const data = await env.SPLITTER_KV.get<TelegramData>(KV_KEYS.telegram(userId), 'json');
+  const data = await getTelegramLink(env as never, userId);
   if (!data) return Response.json({ success: false, error: 'Not connected' }, { status: 400 });
 
   const updated: TelegramData = {
     ...data,
     notifyPrefs: { ...DEFAULT_NOTIFY_PREFS, ...data.notifyPrefs, ...updates },
   };
-  await env.SPLITTER_KV.put(KV_KEYS.telegram(userId), JSON.stringify(updated));
+  await saveTelegramLink(env as never, userId, updated);
 
   return Response.json({ success: true, data: { notifyPrefs: updated.notifyPrefs } });
 }
@@ -120,8 +123,9 @@ async function handleWebhook(request: Request, env: Env): Promise<Response> {
       return;
     }
 
-    const connectData = await env.SPLITTER_KV.get<TelegramConnectToken>(
-      KV_KEYS.telegramConnect(token), 'json',
+    const connectData = await getEphemeral<TelegramConnectToken>(
+      env as never,
+      KV_KEYS.telegramConnect(token),
     );
     if (!connectData || new Date(connectData.expiresAt) < new Date()) {
       await ctx.reply('❌ This link is expired or invalid. Please try again from the app.');
@@ -131,26 +135,10 @@ async function handleWebhook(request: Request, env: Env): Promise<Response> {
     const chatId = String(ctx.chat.id);
     const telegramName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ') || ctx.from?.username || 'Unknown';
 
-    // Enforce 1:1 — if this Telegram account is already linked to another user, disconnect it first
-    const existingUserId = await env.SPLITTER_KV.get(KV_KEYS.telegramChatId(chatId));
-    if (existingUserId && existingUserId !== connectData.userId) {
-      await env.SPLITTER_KV.delete(KV_KEYS.telegram(existingUserId));
-    }
-
-    // Detect a rebind: the user previously linked a different chat. We must
-    // order the writes so that at no point does the stale-entry cleanup in
-    // sendTelegramNotification (which deletes telegram(userId) when the
-    // forward mapping doesn't match) observe a half-migrated state that
-    // could wipe the freshly-connected chat.
-    //
-    // Order:
-    //   1) put telegramChatId(NEW_chatId) → userId   (forward mapping in place)
-    //   2) put telegram(userId) → NEW data            (reverse mapping updated)
-    //   3) delete telegramChatId(OLD_chatId)          (kill the stale forward)
-    // Between 1 and 2 a concurrent sender still reads the OLD reverse, whose
-    // OLD forward is still live — the worst case is a notification to the
-    // old chat, never data loss.
-    const existingData = await env.SPLITTER_KV.get<TelegramData>(KV_KEYS.telegram(connectData.userId), 'json');
+    // One Telegram account per person: the unique index on chat_id means a
+    // rebind is a single upsert. The KV version needed a careful three-write
+    // ordering here because nothing stopped two users claiming one chat.
+    await deleteTelegramLinkByChat(env as never, chatId, connectData.userId);
 
     const telegramData: TelegramData = {
       chatId,
@@ -158,12 +146,8 @@ async function handleWebhook(request: Request, env: Env): Promise<Response> {
       connectedAt: new Date().toISOString(),
       notifyPrefs: DEFAULT_NOTIFY_PREFS,
     };
-    await env.SPLITTER_KV.put(KV_KEYS.telegramChatId(chatId), connectData.userId);
-    await env.SPLITTER_KV.put(KV_KEYS.telegram(connectData.userId), JSON.stringify(telegramData));
-    if (existingData && existingData.chatId !== chatId) {
-      await env.SPLITTER_KV.delete(KV_KEYS.telegramChatId(existingData.chatId));
-    }
-    await env.SPLITTER_KV.delete(KV_KEYS.telegramConnect(token));
+    await saveTelegramLink(env as never, connectData.userId, telegramData);
+    await deleteEphemeral(env as never, KV_KEYS.telegramConnect(token));
 
     // Show the user's first-group display name in the confirmation for a personal touch.
     const memberships = await getMemberships(env as unknown as AuthEnv, connectData.userId);
@@ -185,7 +169,7 @@ async function handleWebhook(request: Request, env: Env): Promise<Response> {
     const chatId = String(ctx.callbackQuery.from.id);
     const messageId = ctx.callbackQuery.message?.message_id;
 
-    const userId = await env.SPLITTER_KV.get(KV_KEYS.telegramChatId(chatId));
+    const userId = await findTelegramUserByChat(env as never, chatId);
     if (!userId) {
       await ctx.answerCallbackQuery({ text: 'Session expired. Please reconnect.' });
       return;

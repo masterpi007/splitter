@@ -1,17 +1,10 @@
 import type { AuthEnv } from '../types/auth';
 import { requireGroupAdmin } from '../utils/session';
-import { LEGACY_GROUP_ID, getExpenses } from '../utils/groups';
+import { getExpenses } from '../utils/groups';
 import { removeMembership } from '../utils/users';
 import { listGroupInvites, deleteInvite } from '../utils/invites';
 import { calculateBalances, isBalanceClear, unacceptedCountFor } from '../utils/balances';
 
-// Legacy group uses bare keys; all others use namespaced keys.
-function groupKvKey(groupId: string) {
-  return groupId === LEGACY_GROUP_ID ? 'group' : `group::${groupId}`;
-}
-function expensesKvKey(groupId: string) {
-  return groupId === LEGACY_GROUP_ID ? 'expenses' : `expenses::${groupId}`;
-}
 
 // DELETE /api/groups/:id — admin deletes the entire group.
 // Removes: group record, expenses, invites, all user memberships.
@@ -61,20 +54,10 @@ export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
       .filter((uid): uid is string => !!uid);
     await Promise.all(userIds.map((uid) => removeMembership(env, uid, groupId)));
 
-    // 3. Delete group record and expenses (use correct keys for legacy group)
-    await Promise.all([
-      env.SPLITTER_KV.delete(groupKvKey(groupId)),
-      env.SPLITTER_KV.delete(expensesKvKey(groupId)),
-      env.SPLITTER_KV.delete(`group-invites::${groupId}`),
-    ]);
-
-    // 4. Remove from group index (legacy group not in index but harmless)
-    const GROUP_INDEX_KEY = 'group-index';
-    const index = (await env.SPLITTER_KV.get<string[]>(GROUP_INDEX_KEY, 'json')) ?? [];
-    const filtered = index.filter((id) => id !== groupId);
-    if (filtered.length !== index.length) {
-      await env.SPLITTER_KV.put(GROUP_INDEX_KEY, JSON.stringify(filtered));
-    }
+    // 3. One delete: members, expenses (with their splits, items, tags and
+    // history) and invites all cascade from the group row. No index to
+    // maintain either — listGroupIds is a query now.
+    await env.DB.prepare(`DELETE FROM groups WHERE id = ?`).bind(groupId).run();
 
     return Response.json({ success: true, data: { deleted: true } });
   } catch (error) {

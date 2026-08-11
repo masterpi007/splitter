@@ -1,5 +1,4 @@
 import type { AuthEnv } from '../types/auth';
-import { KV_KEYS } from '../types/auth';
 import { requireSession } from '../utils/session';
 import { getTokenFromCookies, verifyToken, deleteSession, clearAuthCookie } from '../utils/jwt';
 import { getMemberships, removeMembership } from '../utils/users';
@@ -52,12 +51,11 @@ export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
       await softRemoveMember(env, group, m.memberId);
     }
 
-    // Wipe user data.
-    await Promise.all([
-      env.SPLITTER_KV.delete(`user::${userId}`),
-      env.SPLITTER_KV.delete(`user::${userId}::memberships`),
-      env.SPLITTER_KV.delete(KV_KEYS.credentials(userId)),
-    ]);
+    // Wipe user data. Deleting the user row cascades credentials, sessions,
+    // push subscriptions, prefs, notifications and the Telegram link; member
+    // rows keep their names (user_id is set to NULL) so expense history still
+    // resolves.
+    await env.DB.prepare(`DELETE FROM users WHERE id = ?`).bind(userId).run();
 
     // Invalidate the current session.
     const token = getTokenFromCookies(context.request);

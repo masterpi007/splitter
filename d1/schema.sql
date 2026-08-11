@@ -217,6 +217,9 @@ CREATE TABLE telegram_links (
   user_id       TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   chat_id       TEXT NOT NULL,
   telegram_name TEXT,
+  -- Per-user notification prefs for the bot (JSON NotifyPrefs). Distinct from
+  -- push_prefs, which are per group; the bot is one channel per person.
+  notify_prefs  TEXT,
   linked_at     TEXT NOT NULL
 );
 CREATE UNIQUE INDEX telegram_chat_idx ON telegram_links(chat_id);

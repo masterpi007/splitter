@@ -11,6 +11,7 @@ import { getGroup, findMember, isAdmin } from '../../../utils/groups';
 import { getUser, isUserMemberOfGroup } from '../../../utils/users';
 import { isAppAdmin } from '../../../utils/admin';
 import { createPasskeyInvite } from '../../../utils/passkeyInvite';
+import { deleteAllCredentials } from '../../../utils/credentials';
 
 // Recovery links are handed to the member out-of-band (chat, email), so they
 // need to outlive the 10-minute self-serve window. Seven days balances
@@ -74,7 +75,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     if (revokeExisting) {
       // Drop every existing credential so the lost passkey can no longer sign
       // in. The recovery link below re-populates the record with a fresh one.
-      await env.SPLITTER_KV.delete(KV_KEYS.credentials(target.userId));
+      await deleteAllCredentials(env, target.userId);
     }
 
     // Prefer the member's global identity name (what the /invite page and the
