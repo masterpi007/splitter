@@ -1,6 +1,6 @@
 import * as jose from 'jose';
 import type { JWTPayload, Session, AuthEnv } from '../types/auth';
-import { KV_KEYS, SESSION_TTL_SECONDS } from '../types/auth';
+import { SESSION_TTL_SECONDS } from '../types/auth';
 
 // Create a new session and JWT token
 export async function createSession(
@@ -42,8 +42,6 @@ export async function createSession(
 }
 
 // Verify JWT token and return payload.
-// Normalizes legacy tokens (which carried memberId/memberName) since those
-// may still be in circulation at the time of deploy — legacy invariant: userId === memberId.
 export async function verifyToken(
   env: AuthEnv,
   token: string
@@ -52,8 +50,8 @@ export async function verifyToken(
     const secret = new TextEncoder().encode(env.JWT_SECRET);
     const { payload } = await jose.jwtVerify(token, secret);
     const raw = payload as unknown as Record<string, unknown>;
-    const userId = (raw.userId as string | undefined) ?? (raw.memberId as string | undefined);
-    const userName = (raw.userName as string | undefined) ?? (raw.memberName as string | undefined);
+    const userId = raw.userId as string | undefined;
+    const userName = raw.userName as string | undefined;
     if (!userId || !userName) return null;
     return {
       sessionId: raw.sessionId as string,
@@ -67,9 +65,7 @@ export async function verifyToken(
   }
 }
 
-// Get session from KV by session ID.
-// Normalizes legacy sessions (which carried memberId/memberName) to the new
-// userId/userName shape — legacy invariant: userId === memberId.
+// Get session by session ID.
 export async function getSession(
   env: AuthEnv,
   sessionId: string

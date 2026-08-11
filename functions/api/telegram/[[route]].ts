@@ -8,7 +8,6 @@ import type { TelegramData, TelegramConnectToken, NotifyPrefs, AuthEnv } from '.
 import { editTelegramMessage, sendTelegramNotification, createCallbackData, resolveCallback } from '../utils/telegram';
 import { getTokenFromCookies, verifySession } from '../utils/jwt';
 import {
-  LEGACY_GROUP_ID,
   getExpenses as getGroupExpenses,
   saveExpenses as saveGroupExpenses,
   getGroup as getGroupRecord,
@@ -162,8 +161,6 @@ async function handleWebhook(request: Request, env: Env): Promise<Response> {
 
   // Callback query — button taps.
   // Callback data format: "<action>:<groupId>:<expenseId>". Older messages sent
-  // before multi-group support used "<action>:<expenseId>" — those fall back to
-  // the legacy 1matrix group so existing in-flight notifications still work.
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data;
     const chatId = String(ctx.callbackQuery.from.id);
@@ -175,7 +172,7 @@ async function handleWebhook(request: Request, env: Env): Promise<Response> {
       return;
     }
 
-    const resolved = await resolveCallback(env, data, LEGACY_GROUP_ID);
+    const resolved = await resolveCallback(env, data);
     if (!resolved) {
       await ctx.answerCallbackQuery({ text: 'Invalid or expired action.' });
       return;

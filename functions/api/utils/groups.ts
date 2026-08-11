@@ -16,10 +16,6 @@ import {
   type MemberRow,
 } from './db';
 
-// Retained so the pre-multi-group handlers still compile. No record carries
-// this id any more; those branches are dead and get removed separately.
-export const LEGACY_GROUP_ID = '1matrix';
-
 export interface GroupMember {
   id: string;
   userId?: string; // null for pre-created placeholders not yet claimed

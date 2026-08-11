@@ -175,6 +175,15 @@ export function GroupManager() {
     if (recovery) setRecoveries((prev) => ({ ...prev, [member.id]: recovery }));
   };
 
+  // Same endpoint, non-destructive: the member keeps the passkeys they have
+  // and the link just adds one more device.
+  const handleAddDevice = async (member: Member) => {
+    const recovery = await wrap(`add-device-${member.id}`, () =>
+      api.recoverMemberPasskey(member.id, { revokeExisting: false }),
+    );
+    if (recovery) setRecoveries((prev) => ({ ...prev, [member.id]: recovery }));
+  };
+
   const handleCopyRecoveryLink = async (url: string) => {
     try {
       await navigator.clipboard.writeText(url);
@@ -344,24 +353,49 @@ export function GroupManager() {
                 </button>
               )}
               {canRecoverPasskeys && !isMe && !!m.userId && (
-                <button
-                  onClick={() => handleRecoverPasskey(m)}
-                  disabled={busy === `recover-${m.id}`}
-                  className="text-xs px-2 py-1 border border-amber-700 text-amber-300 rounded hover:bg-amber-900/30 disabled:opacity-50"
-                  title="Revoke this member's passkey and issue a recovery link"
-                >
-                  {busy === `recover-${m.id}` ? 'Resetting…' : 'Reset passkey'}
-                </button>
+                <>
+                  {/* Non-destructive first: helping someone add a laptop
+                      shouldn't cost them the passkey on their phone. */}
+                  <button
+                    onClick={() => handleAddDevice(m)}
+                    disabled={busy === `add-device-${m.id}`}
+                    className="text-xs px-2 py-1 border border-cyan-700 text-cyan-300 rounded hover:bg-cyan-900/30 disabled:opacity-50"
+                    title="Issue a link that adds another device, keeping existing passkeys"
+                  >
+                    {busy === `add-device-${m.id}` ? 'Creating…' : 'Add device'}
+                  </button>
+                  <button
+                    onClick={() => handleRecoverPasskey(m)}
+                    disabled={busy === `recover-${m.id}`}
+                    className="text-xs px-2 py-1 border border-amber-700 text-amber-300 rounded hover:bg-amber-900/30 disabled:opacity-50"
+                    title="Revoke this member's passkey and issue a recovery link"
+                  >
+                    {busy === `recover-${m.id}` ? 'Resetting…' : 'Reset passkey'}
+                  </button>
+                </>
               )}
               </div>
               {recovery && (
                 <div className="px-4 pb-3 -mt-1">
-                  <div className="p-3 bg-amber-900/20 border border-amber-800 rounded-lg">
-                    <p className="text-xs text-amber-200 mb-2">
-                      Recovery link for <span className="font-medium">{recovery.memberName}</span>
-                      {recovery.revokedExisting && ' — old passkeys revoked'}. Expires{' '}
-                      {new Date(recovery.expiresAt).toLocaleDateString()}. Share privately: anyone
-                      with this link can sign in as {recovery.memberName}.
+                  <div
+                    className={`p-3 rounded-lg border ${
+                      recovery.revokedExisting
+                        ? 'bg-amber-900/20 border-amber-800'
+                        : 'bg-cyan-900/20 border-cyan-800'
+                    }`}
+                  >
+                    <p
+                      className={`text-xs mb-2 ${
+                        recovery.revokedExisting ? 'text-amber-200' : 'text-cyan-200'
+                      }`}
+                    >
+                      {recovery.revokedExisting ? 'Recovery link' : 'Add-device link'} for{' '}
+                      <span className="font-medium">{recovery.memberName}</span>
+                      {recovery.revokedExisting
+                        ? ' — old passkeys revoked'
+                        : ' — existing passkeys still work'}
+                      . Expires {new Date(recovery.expiresAt).toLocaleDateString()}. Share
+                      privately: anyone with this link can sign in as {recovery.memberName}.
                     </p>
                     <div className="flex items-center gap-2">
                       <p

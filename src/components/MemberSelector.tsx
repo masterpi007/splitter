@@ -34,12 +34,8 @@ export function MemberSelector() {
     if (authLoading || !group) return;
 
     if (authenticated && session) {
-      // Find the caller's member row in the active group. Legacy 1matrix
-      // members have userId === id so the first lookup matches; for joined
-      // groups, userId is the authoritative link.
-      const member =
-        group.members.find((m) => m.userId === session.userId) ??
-        group.members.find((m) => m.id === session.userId);
+      // userId is the authoritative link between an account and its row.
+      const member = group.members.find((m) => m.userId === session.userId);
       if (member) {
         // Adopt the fresh member row whenever it differs — comparing only
         // id/name left bank & avatar changes from other devices invisible

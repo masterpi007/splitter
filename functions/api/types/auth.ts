@@ -5,11 +5,7 @@ import type {
 
 // Environment with auth config
 export interface AuthEnv {
-  // Primary store. KV cached reads for 60s per data centre, which made a
-  // write invisible to other devices for up to a minute; D1 reads hit the
-  // primary and its transactions replace the advisory expense lock.
   DB: D1Database;
-  SPLITTER_KV: KVNamespace;
   JWT_SECRET: string;
   // WebAuthn Relying Party overrides. Absent ⇒ derived from the request URL
   // (see utils/rp.ts), which is correct for a single-domain deployment.
@@ -47,10 +43,7 @@ export interface StoredChallenge {
   expiresAt: string;
 }
 
-// Session stored in KV.
-// `userId` is the global identity (owner of passkeys and memberships).
-// Legacy sessions predating multi-group support will have userId === memberId;
-// the session refresh in verifySession normalizes this.
+// `userId` is the global identity: owner of passkeys and memberships.
 export interface Session {
   sessionId: string;
   userId: string;
@@ -70,9 +63,9 @@ export interface JWTPayload {
 
 // API request/response types.
 //
-// Registration only targets the legacy '1matrix' group where userId === memberId.
-// Joining a non-legacy group is done via the invite-accept flow, which gates on
-// a valid invite code and reuses the caller's existing userId.
+// Registration mints a standalone identity; joining a group goes through the
+// invite-accept flow, which gates on a valid invite code and reuses the
+// caller's existing userId.
 export interface RegisterOptionsRequest {
   memberId: string; // member row to attach the passkey/user to
   memberName: string;
@@ -95,7 +88,6 @@ export interface RegisterVerifyResponse {
 }
 
 export interface LoginOptionsRequest {
-  // Either userId (preferred) OR memberId (legacy — equals userId for pre-multi-group data).
   userId?: string;
   memberId?: string;
 }
@@ -167,32 +159,13 @@ export interface NotificationRecord {
   read: boolean;
 }
 
-// KV key helpers.
-//
-// `credentials(userId)` intentionally uses the same 'credentials:<id>' pattern
-// as the pre-multi-group schema: legacy userId === memberId, so old records
-// remain readable without rewriting.
-//
-// Push/notification/telegram keys are scoped by (userId, groupId) tuple so a
-// user can be in multiple groups without their devices receiving cross-group
-// notifications. Legacy single-key form is preserved via the two-arg signature
-// supporting an absent groupId — callers in the new code path should always pass one.
+// Keys for the `ephemeral` table — short-lived tokens that used to be KV
+// entries with a TTL. Only these five remain; everything else that lived in
+// KV is now a proper table with its own columns.
 export const KV_KEYS = {
-  credentials: (userId: string) => `credentials:${userId}`,
-  challenge: (userId: string) => `challenges:${userId}`,
-  session: (sessionId: string) => `sessions:${sessionId}`,
   invite: (inviteCode: string) => `invites:${inviteCode}`,
   inviteChallenge: (inviteCode: string) => `invite-challenges:${inviteCode}`,
-  pushSubscriptions: (userId: string, groupId?: string) =>
-    groupId ? `push-subs:${userId}:${groupId}` : `push-subs:${userId}`,
-  notifications: (userId: string, groupId?: string) =>
-    groupId ? `notifications:${userId}:${groupId}` : `notifications:${userId}`,
-  telegram: (userId: string) => `telegram:${userId}`,
   telegramConnect: (token: string) => `telegram:connect:${token}`,
-  telegramChatId: (chatId: string) => `telegram:chatid:${chatId}`,
-  pushPrefs: (userId: string, groupId?: string) =>
-    groupId ? `push-prefs:${userId}:${groupId}` : `push-prefs:${userId}`,
-  telegramRejectState: (chatId: string) => `telegram:reject-state:${chatId}`,
   debounceNotify: (expenseId: string) => `debounce:notify:${expenseId}`,
   telegramCallback: (token: string) => `tg-cb:${token}`,
 } as const;

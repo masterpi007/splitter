@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler pages dev --proxy=5173 --compatibility-date=2024-01-01",
+    "dev": "wrangler pages dev --proxy=5173 --compatibility-date=2024-01-01 --d1 DB=chia",
     "dev:vite": "vite",
     "build": "tsc && vite build",
-    "preview": "wrangler pages dev dist",
+    "preview": "wrangler pages dev dist --d1 DB=chia",
     "deploy": "npm run build && wrangler pages deploy dist"
   },
   "dependencies": {

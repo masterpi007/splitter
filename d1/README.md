@@ -1,15 +1,15 @@
-# D1 migration
+# Database
 
-Chia is moving from Workers KV to D1 (SQLite). KV caches every read for 60
-seconds per data centre, so a write on one device stayed invisible to another
-for up to a minute; D1 reads hit the primary and are strongly consistent.
-D1 transactions also replace the advisory lock that only narrowed the
-read-modify-write race on a group's expense array.
+Chia stores everything in one D1 (SQLite) database. It replaced Workers KV in
+August 2026: KV cached every read for 60 seconds per data centre, so a write
+on one device stayed invisible to another for up to a minute, and its lack of
+transactions forced an advisory lock around the group's expense array that
+only narrowed the race rather than closing it.
 
-We are starting with an empty database: groups and members are recreated by
-hand in the app, historical transactions are imported from CSV. Everyone
-registers a passkey again — the keyring lives in the old KV namespace and is
-not migrated.
+The migration started from an empty database — groups and members were
+recreated in the app, historical transactions imported from the CSVs below,
+and everyone registered a fresh passkey, since the old keyring lived in KV.
+The KV namespace is no longer bound or referenced by any code.
 
 ## Creating the database
 
@@ -86,6 +86,18 @@ date,description,amount,paid_by,split,tags,type
 2026-08-02,Taxi,120,Dad,"Minh:2,Dad:1",travel,
 2026-08-03,Groceries,301,Minh,"Minh=200.5,Dad=100.5",,
 2026-08-04,Payback,100,Dad,Minh,,settlement
+```
+
+## Changing the schema
+
+D1 has no migration tooling wired up here, so a schema change is an `ALTER
+TABLE` run by hand against the live database *before* the code that needs it
+is deployed, plus the matching edit to `schema.sql` so fresh databases are
+born correct. Applied so far:
+
+```sql
+-- 2026-08-11: per-user Telegram notification preferences
+ALTER TABLE telegram_links ADD COLUMN notify_prefs TEXT;
 ```
 
 ## Exporting later

@@ -13,19 +13,15 @@ import { createUser, addMembership } from '../../utils/users';
 import { getInvite } from '../../utils/invites';
 import { getRp } from '../../utils/rp';
 
-// Register a brand-new User and attach them to a group. Two target-group
-// modes:
-//   - no inviteCode: legacy '1matrix' group (memberId === userId invariant).
-//     This is the MemberSelector "New User" flow.
-//   - inviteCode: the invite's group. Registers the new User and joins them
-//     to that group atomically, so a brand-new visitor arriving on an invite
-//     link can create an account and become a member in one round trip.
+// Register a brand-new User. Without an inviteCode this mints a standalone
+// identity with no group (the "New User" flow); with one, the new User is
+// created and joined to the invite's group in a single round trip, so a
+// visitor arriving on an invite link needs one step, not two.
 // In both cases the caller-supplied `memberId` is treated as the User.id
 // and as the WebAuthn userID (that's what /api/auth/register/options keys
 // the challenge by). Accepting a client-supplied groupId would let an
 // unauthenticated caller bind a passkey to an arbitrary member row in any
-// group — the groupId is always derived from trusted state (legacy hard-
-// code or server-stored invite record).
+// group — the groupId is always derived from the server-stored invite.
 export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
   try {
     const { memberId, memberName, credential, friendlyName, inviteCode } =
@@ -59,8 +55,8 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     // Refuse to (re)register an identity that already has passkeys. Adding
     // another passkey to an existing account goes through the authenticated
     // /api/auth/passkeys/invite flow. Without this gate, any unauthenticated
-    // caller who knows a legacy memberId (UUIDs are visible to every group
-    // member) could append their own credential to the victim's account.
+    // caller who knows a memberId (UUIDs are visible to every group member)
+    // could append their own credential to the victim's account.
     // Allow registration if a User row exists but has no credentials yet
     // (placeholder/bootstrap case — the member row was created but never
     // claimed with a passkey).
@@ -102,8 +98,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
     // userId — the invite flow mints a fresh UUID each call, so it will
     // never collide with an existing account. The authoritative dedupe is
     // by credential id (globally unique per authenticator), checked here
-    // after WebAuthn verification so we never touch KV on unverified
-    // claims. Without this, a returning user on an invite link would end
+    // after WebAuthn verification so we never write on unverified claims. Without this, a returning user on an invite link would end
     // up with a second, duplicate User backed by the same physical
     // passkey.
     const credentialId = verification.registrationInfo.credential.id;
@@ -139,7 +134,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
         group,
         userId,
         memberName,
-        { legacy: false, clientMemberId: memberId, now },
+        { clientMemberId: memberId, now },
       );
       if (conflict) return conflict;
 
@@ -200,8 +195,6 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
 // Mutates `group.members` in place to attach `userId` as a member. Returns
 // the memberId that was claimed/created, or a Response carrying an error
 // the caller should surface.
-//   legacy: the existing row with id === clientMemberId is claimed; if none
-//     exists, insert one (first-member case).
 //   invite: look for a placeholder (userId-less row) whose name matches the
 //     display name; if found claim it in place, otherwise insert a fresh
 //     row with a server-minted memberId and a unique name.
@@ -209,43 +202,9 @@ function attachToGroup(
   group: GroupRecord,
   userId: string,
   memberName: string,
-  opts: { legacy: boolean; clientMemberId: string; now: string },
+  opts: { clientMemberId: string; now: string },
 ): { memberId: string; conflict?: Response } {
-  const { legacy, clientMemberId, now } = opts;
-
-  if (legacy) {
-    const idx = group.members.findIndex((m) => m.id === clientMemberId);
-    if (idx === -1) {
-      const newMember: GroupMember = {
-        id: clientMemberId,
-        userId,
-        name: memberName,
-        joinedAt: now,
-      };
-      group.members.push(newMember);
-      return { memberId: clientMemberId };
-    }
-    const existing = group.members[idx];
-    // Refuse to rebind a member row that's already claimed by a different
-    // user. In legacy this can't happen (userId === memberId invariant);
-    // the check is defense-in-depth for stale/promoted data.
-    if (existing.userId && existing.userId !== userId) {
-      return {
-        memberId: clientMemberId,
-        conflict: Response.json(
-          { success: false, error: 'Member is already claimed' },
-          { status: 409 },
-        ),
-      };
-    }
-    group.members[idx] = {
-      ...existing,
-      userId,
-      name: memberName,
-      joinedAt: existing.joinedAt ?? now,
-    };
-    return { memberId: clientMemberId };
-  }
+  const { now } = opts;
 
   // Invite flow: claim placeholder by normalized name if one matches —
   // preserves admin-seeded attributions instead of creating a duplicate.

@@ -35,12 +35,11 @@ export async function createCallbackData(
 
 /**
  * Resolve a callback_data string: handles `cb:{token}` (KV lookup) and the
- * legacy `action:groupId:expenseId` format (for short IDs like the 1matrix group).
+ * `cb:{token}` form only.
  */
 export async function resolveCallback(
   env: { DB: D1Database },
   data: string,
-  legacyGroupId: string,
 ): Promise<{ action: string; groupId: string; expenseId: string } | null> {
   if (data.startsWith('cb:')) {
     const token = data.slice(3);
@@ -48,7 +47,6 @@ export async function resolveCallback(
   }
   const parts = data.split(':');
   if (parts.length >= 3) return { action: parts[0], groupId: parts[1], expenseId: parts[2] };
-  if (parts.length === 2) return { action: parts[0], groupId: legacyGroupId, expenseId: parts[1] };
   return null;
 }
 

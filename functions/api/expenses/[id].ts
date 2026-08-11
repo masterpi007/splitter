@@ -57,6 +57,83 @@ function structuralFieldsChanged(before: Expense, after: Expense): boolean {
   );
 }
 
+// What a member who is neither creator nor admin may change on someone
+// else's expense. Previously the server only guarded "structural" fields, so
+// any group member could accept another member's split or move amounts
+// between splits — sign-offs are the app's record of agreement, so they have
+// to be forgeable only by their owner.
+//
+// Returns an error message, or null when every change is permitted.
+function authorizeParticipantEdit(
+  before: Expense,
+  after: Expense,
+  actorId: string,
+): string | null {
+  const frozen = [
+    'description', 'amount', 'paidBy', 'createdBy', 'splitType',
+    'discount', 'discountType', 'receiptUrl', 'receiptDate',
+  ] as const;
+  for (const f of frozen) {
+    if (before[f] !== after[f]) return `Only the creator or a group admin can change ${f}`;
+  }
+
+  // Splits: the member set and every amount stay put; a member may flip only
+  // their own acceptance.
+  const beforeSplits = new Map((before.splits ?? []).map((s) => [s.memberId, s]));
+  const afterSplits = new Map((after.splits ?? []).map((s) => [s.memberId, s]));
+  if (beforeSplits.size !== afterSplits.size) {
+    return 'Only the creator or a group admin can change who this is split between';
+  }
+  for (const [memberId, a] of afterSplits) {
+    const b = beforeSplits.get(memberId);
+    if (!b) return 'Only the creator or a group admin can change who this is split between';
+    if (b.amount !== a.amount || b.value !== a.value) {
+      return 'Only the creator or a group admin can change split amounts';
+    }
+    const acceptanceChanged = b.signedOff !== a.signedOff || b.signedAt !== a.signedAt;
+    if (acceptanceChanged && memberId !== actorId) {
+      return 'You can only accept your own share';
+    }
+  }
+
+  // Group-mode ledger: the actor may add or remove their own entry only.
+  const beforeSigned = new Set((before.signedOffBy ?? []).map((s) => s.memberId));
+  const afterSigned = new Set((after.signedOffBy ?? []).map((s) => s.memberId));
+  for (const id of new Set([...beforeSigned, ...afterSigned])) {
+    if (id !== actorId && beforeSigned.has(id) !== afterSigned.has(id)) {
+      return 'You can only accept your own share';
+    }
+  }
+
+  // Items: amounts are fixed; a member may claim an unassigned item, release
+  // one of their own, and retitle their own.
+  const beforeItems = new Map(
+    ((before as any).items ?? []).map((i: any) => [i.id, i]),
+  ) as Map<string, any>;
+  const afterItems = (after as any).items ?? [];
+  if (beforeItems.size !== afterItems.length) {
+    return 'Only the creator or a group admin can add or remove items';
+  }
+  for (const item of afterItems) {
+    const b = beforeItems.get(item.id);
+    if (!b) return 'Only the creator or a group admin can add or remove items';
+    if (b.amount !== item.amount) {
+      return 'Only the creator or a group admin can change item amounts';
+    }
+    if (b.memberId !== item.memberId) {
+      const claiming = !b.memberId && item.memberId === actorId;
+      const releasing = b.memberId === actorId && !item.memberId;
+      if (!claiming && !releasing) return 'You can only claim or release your own items';
+    }
+    if (b.description !== item.description && b.memberId !== actorId) {
+      return 'You can only rename your own items';
+    }
+  }
+
+  // Tags stay editable by any participant — they carry no financial meaning.
+  return null;
+}
+
 function canEditExpenseStructurally(
   group: GroupRecord,
   expense: Expense,
@@ -174,13 +251,14 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
         // History is server-owned — never accept it from the client.
         history: before.history,
       };
-      const structural = structuralFieldsChanged(before, merged);
-      if (structural && !canEditExpenseStructurally(group, before, member)) {
-        return Response.json(
-          { success: false, error: 'Only the creator or a group admin can change this expense' },
-          { status: 403 },
-        );
+      const privileged = canEditExpenseStructurally(group, before, member);
+      if (!privileged) {
+        const denied = authorizeParticipantEdit(before, merged, member.id);
+        if (denied) {
+          return Response.json({ success: false, error: denied }, { status: 403 });
+        }
       }
+      const structural = structuralFieldsChanged(before, merged);
       if (structural) {
         const validationError = validateExpenseInput(group, merged);
         if (validationError) {
