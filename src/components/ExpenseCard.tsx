@@ -128,22 +128,29 @@ export function ExpenseCard({
   const startOffset = useRef(0);
   const swipedRef = useRef(false);
 
-  const onTouchStart = (e: React.TouchEvent) => {
+  // Pointer events cover both touch and mouse drags. touch-action: pan-y on
+  // the card keeps vertical scrolling native while horizontal drags reach us.
+  const onPointerDown = (e: React.PointerEvent) => {
     if (actionWidth === 0) return;
-    touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    touchStart.current = { x: e.clientX, y: e.clientY };
     startOffset.current = swipeX;
     swipedRef.current = false;
     setDragging(true);
   };
-  const onTouchMove = (e: React.TouchEvent) => {
+  const onPointerMove = (e: React.PointerEvent) => {
     if (!touchStart.current) return;
-    const dx = e.touches[0].clientX - touchStart.current.x;
-    const dy = e.touches[0].clientY - touchStart.current.y;
-    if (Math.abs(dy) > Math.abs(dx)) return; // vertical scroll wins
-    if (Math.abs(dx) > 8) swipedRef.current = true;
+    const dx = e.clientX - touchStart.current.x;
+    const dy = e.clientY - touchStart.current.y;
+    if (!swipedRef.current && Math.abs(dy) > Math.abs(dx)) return; // vertical scroll wins
+    if (Math.abs(dx) > 8 && !swipedRef.current) {
+      swipedRef.current = true;
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
     setSwipeX(Math.min(0, Math.max(-actionWidth, startOffset.current + dx)));
   };
-  const onTouchEnd = () => {
+  const onPointerEnd = () => {
+    if (!touchStart.current) return;
     touchStart.current = null;
     setDragging(false);
     setSwipeX((x) => (x < -actionWidth / 2 ? -actionWidth : 0));
@@ -211,20 +218,28 @@ export function ExpenseCard({
           openExpenseView();
         }
       }}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
       // Only set a transform while swiping — a permanent transform would turn
       // this div into the containing block for the fixed-position modals.
-      style={swipeX !== 0 || dragging ? { transform: `translateX(${swipeX}px)`, transition: dragging ? 'none' : 'transform 200ms ease' } : undefined}
-      className={`relative bg-gray-800 rounded-lg shadow-sm border p-4 cursor-pointer transition-all duration-150 ${
+      style={{
+        touchAction: 'pan-y',
+        ...(swipeX !== 0 || dragging
+          ? { transform: `translateX(${swipeX}px)`, transition: dragging ? 'none' : 'transform 200ms ease' }
+          : {}),
+      }}
+      className={`${dragging ? 'select-none ' : ''}relative bg-gray-800 rounded-lg shadow-sm border p-4 cursor-pointer transition-all duration-150 ${
+        // Pending (yellow) outranks the type colors — an unaccepted
+        // settlement is still pending first, cyan second.
         expenseDeleted
           ? 'border-gray-700 hover:shadow-[0_0_0_1px_rgba(55,65,81,0.45),0_10px_30px_rgba(55,65,81,0.12)]'
+          : !allSigned
+          ? 'border-yellow-700 hover:shadow-[0_0_0_1px_rgba(161,98,7,0.45),0_10px_30px_rgba(161,98,7,0.14)]'
           : isSettlement
           ? 'border-cyan-600 hover:shadow-[0_0_0_1px_rgba(8,145,178,0.5),0_10px_30px_rgba(8,145,178,0.18)]'
-          : allSigned
-          ? 'border-gray-500 hover:shadow-[0_0_0_1px_rgba(107,114,128,0.5),0_10px_30px_rgba(107,114,128,0.14)]'
-          : 'border-yellow-700 hover:shadow-[0_0_0_1px_rgba(161,98,7,0.45),0_10px_30px_rgba(161,98,7,0.14)]'
+          : 'border-gray-500 hover:shadow-[0_0_0_1px_rgba(107,114,128,0.5),0_10px_30px_rgba(107,114,128,0.14)]'
       } hover:-translate-y-0.5 ${expenseDeleted ? 'opacity-60' : ''}`}
     >
       <div className="flex justify-between items-start mb-2">

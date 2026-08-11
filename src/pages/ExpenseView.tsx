@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { formatCurrency, formatRelativeTime, getTagColor, isDeleted } from '../utils/balances';
 import { SignOffButton } from '../components/SignOffButton';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { YouBadge } from '../components/YouBadge';
+import { memberAvatarUrl } from '../components/MemberSelect';
 
 export function ExpenseView() {
   const navigate = useNavigate();
@@ -55,6 +55,8 @@ export function ExpenseView() {
       : !!(userSplit && !userSplit.signedOff && !isPayer)
   );
 
+  // Removed members may still appear in old splits — include them for lookups.
+  const allGroupMembers = [...group.members, ...(group.removedMembers ?? [])];
   const activeMembers = group.members.filter((m) => !m.removedAt);
   const totalShares = activeMembers.reduce((s, m) => s + (m.share ?? 1), 0);
 
@@ -148,19 +150,7 @@ export function ExpenseView() {
           ← Back
         </button>
         <h1 className="text-lg font-semibold text-gray-100">Transaction</h1>
-        {canEdit && !expenseDeleted ? (
-          <Link
-            to={`/edit/${expense.id}`}
-            className="text-gray-400 hover:text-cyan-400 transition-colors"
-            title="Edit transaction"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-            </svg>
-          </Link>
-        ) : (
-          <div className="w-5" />
-        )}
+        <div className="w-5" />
       </div>
 
       {expenseDeleted && (
@@ -197,24 +187,32 @@ export function ExpenseView() {
           </p>
         </div>
 
-        {/* Splits table */}
+        {/* Splits — avatar grid; the current user gets a yellow ring */}
         <div>
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Splits</p>
-          <div className="space-y-1.5">
-            {splitRows.map(({ memberId, amount, signed }) => (
-              <div key={memberId} className="flex items-center justify-between text-sm">
-                <span className="text-gray-300 flex items-center gap-1">
-                  {getMemberName(memberId)}
-                  {currentUser && memberId === currentUser.id && <YouBadge />}
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-200">{formatCurrency(amount, currency)}</span>
-                  <span title={signed ? 'Confirmed' : 'Pending'}>
+          <div className="flex flex-wrap gap-4">
+            {splitRows.map(({ memberId, amount, signed }) => {
+              const member = allGroupMembers.find((m) => m.id === memberId);
+              const isYou = currentUser && memberId === currentUser.id;
+              return (
+                <div key={memberId} className="flex flex-col items-center gap-1 w-16">
+                  <img
+                    src={memberAvatarUrl(member ?? { name: getMemberName(memberId) })}
+                    alt=""
+                    className={`w-12 h-12 rounded-full bg-gray-700 ${isYou ? 'ring-2 ring-amber-400' : ''}`}
+                  />
+                  <span className="text-xs text-gray-300 truncate max-w-full">
+                    {getMemberName(memberId)}
+                  </span>
+                  <span className="text-xs text-gray-200 font-medium whitespace-nowrap">
+                    {formatCurrency(amount, currency)}
+                  </span>
+                  <span className="text-xs" title={signed ? 'Confirmed' : 'Pending'}>
                     {signed ? '✅' : '⏳'}
                   </span>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -263,18 +261,32 @@ export function ExpenseView() {
         </div>
       </div>
 
-      {/* Footer actions */}
+      {/* Footer actions — edit + delete side by side, icon-only */}
       <div className="mt-4 space-y-3">
         {showSignOff && <SignOffButton expense={expense} />}
 
         {canEdit && !expenseDeleted && (
-          <button
-            onClick={() => setShowDeleteConfirm(true)}
-            disabled={deleting}
-            className="w-full py-2 rounded-lg text-sm font-medium text-red-400 border border-red-800 hover:bg-red-900/20 disabled:opacity-50"
-          >
-            {deleting ? 'Deleting...' : 'Delete transaction'}
-          </button>
+          <div className="flex gap-3">
+            <Link
+              to={`/edit/${expense.id}`}
+              title="Edit transaction"
+              className="flex-1 py-2 rounded-lg border border-cyan-700 text-cyan-400 hover:bg-cyan-900/20 flex items-center justify-center"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+              </svg>
+            </Link>
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={deleting}
+              title="Delete transaction"
+              className="flex-1 py-2 rounded-lg border border-red-800 text-red-400 hover:bg-red-900/20 disabled:opacity-50 flex items-center justify-center"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          </div>
         )}
         {deleteError && <p className="text-red-400 text-xs text-center">{deleteError}</p>}
       </div>

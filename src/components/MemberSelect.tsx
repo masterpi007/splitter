@@ -13,10 +13,11 @@ interface MemberSelectProps {
   excludeId?: string;
 }
 
-function avatarUrl(m: Member): string {
+export function memberAvatarUrl(m: Pick<Member, 'avatarSeed' | 'name'>): string {
   const svg = createAvatar(thumbs, { seed: m.avatarSeed || m.name, size: 32 }).toString();
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
+const avatarUrl = memberAvatarUrl;
 
 // Dropdown member picker with profile avatars — native <select> can't render
 // images. Same interaction pattern as the bank picker in ProfileModal.
