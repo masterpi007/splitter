@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { createAvatar } from '@dicebear/core';
 import { thumbs } from '@dicebear/collection';
 import { useApp } from '../context/AppContext';
@@ -9,7 +10,8 @@ import type { Member } from '../types';
 type AuthFlow = 'signin' | 'register' | 'edit-profile' | null;
 
 export function MemberSelector() {
-  const { group, currentUser, setCurrentUser, updateProfile, refreshGroups, refreshData } = useApp();
+  const { group, currentUser, setCurrentUser, updateProfile, refreshGroups, refreshData, clearGroupData } = useApp();
+  const navigate = useNavigate();
   const {
     authenticated,
     session,
@@ -99,13 +101,16 @@ export function MemberSelector() {
 
   const handleLogout = async () => {
     await logout();
-    setCurrentUser(null);
+    clearGroupData();
+    setAuthFlow(null);
+    navigate('/');
   };
 
   const handleDeleteAccount = async () => {
     await logout();
-    setCurrentUser(null);
+    clearGroupData();
     setAuthFlow(null);
+    navigate('/');
   };
 
   const handleEditProfile = () => {

@@ -289,7 +289,7 @@ export function ExpenseCard({
           : !allSigned
           ? 'bg-gray-800 border-yellow-800 hover:border-yellow-500 hover:bg-gray-700/60 hover:shadow-[0_0_18px_rgba(202,138,4,0.4)]'
           : isSettlement
-          ? 'bg-gray-800 border-cyan-800 hover:border-cyan-400 hover:bg-gray-700/60 hover:shadow-[0_0_18px_rgba(8,145,178,0.45)]'
+          ? 'bg-cyan-950/40 border-cyan-800 hover:border-cyan-400 hover:bg-cyan-900/40 hover:shadow-[0_0_18px_rgba(8,145,178,0.45)]'
           : 'bg-gray-800 border-gray-700 hover:border-gray-400 hover:bg-gray-700/60 hover:shadow-[0_0_18px_rgba(156,163,175,0.35)]'
       } ${expenseDeleted ? 'opacity-60' : ''}`}
     >
@@ -298,14 +298,14 @@ export function ExpenseCard({
           {isSettlement ? (
             <>
               <div className="flex items-center gap-2">
-                <span className="text-xs px-2 py-0.5 rounded-full bg-green-900 text-green-300">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-900 text-cyan-300">
                   Settlement
                 </span>
               </div>
               <p className="text-sm mt-2">
-                <span className="text-gray-100">{getMemberName(payer?.id ?? '')}</span>
-                <span className="text-gray-500 mx-2">paid</span>
-                <span className="text-gray-100">{getMemberName(recipient?.id ?? '')}</span>
+                <span className="text-cyan-100">{getMemberName(payer?.id ?? '')}</span>
+                <span className="text-cyan-600/80 mx-2">paid</span>
+                <span className="text-cyan-100">{getMemberName(recipient?.id ?? '')}</span>
               </p>
             </>
           ) : (
@@ -483,7 +483,9 @@ export function ExpenseCard({
                   : hasUnassignedItems
                   ? 'bg-orange-900 text-orange-300'
                   : allSigned
-                  ? 'bg-green-900 text-green-300'
+                  ? isSettlement
+                    ? 'bg-cyan-900 text-cyan-300'
+                    : 'bg-green-900 text-green-300'
                   : 'bg-yellow-900 text-yellow-300'
               }`}
             >
@@ -495,15 +497,15 @@ export function ExpenseCard({
 
       {/* Settlement: simple confirmation status */}
       {isSettlement ? (
-        <div className="mt-3 pt-3 border-t border-gray-700">
+        <div className="mt-3 pt-3 border-t border-cyan-900/60">
           <div className="flex items-center gap-2 text-sm">
             <span
               className={`w-2 h-2 rounded-full ${
-                allSigned ? 'bg-green-500' : 'bg-yellow-500'
+                allSigned ? 'bg-cyan-400' : 'bg-yellow-500'
               }`}
             />
             {allSigned ? (
-              <span className="text-green-400">Confirmed by recipient</span>
+              <span className="text-cyan-300">Confirmed by recipient</span>
             ) : (
               <span className="text-yellow-400">
                 Awaiting confirmation from {getMemberName(recipient?.id ?? '')}

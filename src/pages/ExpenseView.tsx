@@ -166,7 +166,7 @@ export function ExpenseView() {
         <div className="flex items-start justify-between gap-2">
           <p className="text-xl font-semibold text-gray-100 leading-tight">{expense.description}</p>
           <span className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full ${
-            isSettlement ? 'bg-green-900 text-green-300' :
+            isSettlement ? 'bg-cyan-900 text-cyan-300' :
             isGroupMode ? 'bg-amber-400 text-gray-900' :
             'bg-gray-700 text-gray-300'
           }`}>

@@ -374,15 +374,17 @@ export function ProfileModal({ isOpen, currentUser, onClose, onSave, onLogout, o
             <button
               onClick={onLogout}
               disabled={loading}
-              className="cursor-pointer w-full px-4 py-2 bg-gray-700 hover:bg-red-900/40 text-red-400 rounded-lg transition-colors text-sm"
+              className="cursor-pointer w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg transition-colors text-sm"
             >
               Sign Out
             </button>
           )}
+          {/* Destructive action kept clearly apart from the routine one */}
+          <div className="border-t border-gray-700 my-1" />
           <button
             onClick={handleDeleteAccount}
             disabled={loading}
-            className="cursor-pointer w-full px-4 py-2 text-red-600 hover:text-red-400 hover:bg-red-950/40 rounded-lg transition-colors text-xs"
+            className="cursor-pointer w-full px-4 py-2 bg-red-950/60 hover:bg-red-900/70 text-red-300 rounded-lg transition-colors text-sm"
           >
             Delete Account
           </button>

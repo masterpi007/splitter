@@ -28,6 +28,8 @@ interface AppContextType {
   error: string | null;
   setActiveGroup: (groupId: string) => void;
   setCurrentUser: (user: Member | null) => void;
+  /** Wipe all group-scoped state — call on sign-out. */
+  clearGroupData: () => void;
   refreshData: (opts?: { silent?: boolean }) => Promise<void>;
   refreshGroups: () => Promise<void>;
   addMember: (name: string) => Promise<Member | null>;
@@ -75,6 +77,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const setActiveGroup = useCallback((groupId: string) => {
     setActiveGroupId(groupId);
     setActiveGroupIdState(groupId);
+  }, []);
+
+  // Sign-out must drop every group-scoped value: the API stops returning data
+  // but React state (and the stored active group id) would otherwise keep
+  // rendering the previous user's group and expenses.
+  const clearGroupData = useCallback(() => {
+    setGroups([]);
+    setGroup(null);
+    setExpenses([]);
+    setCurrentUserState(null);
+    setError(null);
+    setActiveGroupIdState(null);
+    setGroupsLoading(false);
+    setLoading(false);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('splitter.activeGroupId');
+    }
   }, []);
 
   const refreshGroups = useCallback(async () => {
@@ -336,6 +355,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setCurrentUser,
         refreshData,
         refreshGroups,
+        clearGroupData,
         addMember,
         removeMember,
         updateGroupSettings,

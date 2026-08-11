@@ -16,6 +16,8 @@ export function GroupManager() {
   const [invites, setInvites] = useState<GroupInvite[] | null>(null);
   const [invitesLoading, setInvitesLoading] = useState(false);
   const [invitesError, setInvitesError] = useState<string | null>(null);
+  // Invite code whose QR panel is expanded (only one at a time).
+  const [qrCode, setQrCode] = useState<string | null>(null);
   const [friends, setFriends] = useState<FriendCandidate[] | null>(null);
   const [friendsError, setFriendsError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -436,29 +438,70 @@ export function GroupManager() {
           <ul className="divide-y divide-gray-700">
             {invites.map((inv) => {
               const url = `${window.location.origin}/invite/${inv.code}`;
+              const showQr = qrCode === inv.code;
               return (
-                <li key={inv.code} className="px-4 py-3 flex items-center gap-2">
-                  <p className="flex-1 text-xs text-gray-300 font-mono truncate" title={url}>{url}</p>
-                  <button
-                    onClick={() => handleShareInviteLink(inv.code)}
-                    className="text-xs px-2 py-1 border border-gray-600 rounded hover:bg-gray-700"
-                  >
-                    Share
-                  </button>
-                  <button
-                    onClick={() => handleCopyInviteLink(inv.code)}
-                    className="text-xs px-2 py-1 border border-gray-600 rounded hover:bg-gray-700"
-                  >
-                    Copy
-                  </button>
-                  {isAdmin && (
+                <li key={inv.code} className="px-4 py-3 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <p className="flex-1 text-xs text-gray-300 font-mono truncate" title={url}>{url}</p>
                     <button
-                      onClick={() => handleDeleteInvite(inv.code)}
-                      disabled={busy === `delete-invite-${inv.code}`}
-                      className="text-xs px-2 py-1 border border-red-800 text-red-300 rounded hover:bg-red-900/30 disabled:opacity-50"
+                      onClick={() => setQrCode(showQr ? null : inv.code)}
+                      title={showQr ? 'Hide QR code' : 'Show QR code'}
+                      className={`text-xs px-2 py-1 border rounded ${
+                        showQr
+                          ? 'border-cyan-600 text-cyan-300 bg-cyan-900/30'
+                          : 'border-gray-600 hover:bg-gray-700'
+                      }`}
                     >
-                      Revoke
+                      QR
                     </button>
+                    <button
+                      onClick={() => handleShareInviteLink(inv.code)}
+                      className="text-xs px-2 py-1 border border-gray-600 rounded hover:bg-gray-700"
+                    >
+                      Share
+                    </button>
+                    <button
+                      onClick={() => handleCopyInviteLink(inv.code)}
+                      className="text-xs px-2 py-1 border border-gray-600 rounded hover:bg-gray-700"
+                    >
+                      Copy
+                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => handleDeleteInvite(inv.code)}
+                        disabled={busy === `delete-invite-${inv.code}`}
+                        className="text-xs px-2 py-1 border border-red-800 text-red-300 rounded hover:bg-red-900/30 disabled:opacity-50"
+                      >
+                        Revoke
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Same QR treatment as the passkey-device invite */}
+                  {showQr && (
+                    <div className="p-4 bg-cyan-900/30 border border-cyan-700 rounded-lg space-y-3">
+                      <p className="text-sm text-gray-300">
+                        Scan the QR code or share the link to join {group.name}.
+                      </p>
+                      <div className="flex justify-center bg-white p-3 rounded-lg">
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(url)}`}
+                          alt="Group invite QR code"
+                          className="w-[180px] h-[180px]"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 bg-gray-800 px-3 py-2 rounded text-sm text-cyan-400 font-mono overflow-hidden text-ellipsis">
+                          {inv.code}
+                        </code>
+                        <button
+                          onClick={() => handleCopyInviteLink(inv.code)}
+                          className="px-3 py-2 bg-gray-700 text-white rounded hover:bg-gray-600 text-sm"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </li>
               );
