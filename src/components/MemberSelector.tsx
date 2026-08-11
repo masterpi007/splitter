@@ -192,7 +192,7 @@ export function MemberSelector() {
           disabled={webAuthnLoading}
           title="Sign in"
           aria-label="Sign in"
-          className="p-1.5 bg-cyan-600 text-white rounded hover:bg-cyan-700 disabled:opacity-50"
+          className="p-1.5 text-cyan-400 hover:text-cyan-300 disabled:opacity-50"
         >
           {webAuthnLoading && authFlow === 'signin' ? (
             <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">

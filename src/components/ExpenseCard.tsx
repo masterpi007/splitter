@@ -177,6 +177,16 @@ export function ExpenseCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [swipeHint, actionWidth]);
 
+  // Border color of the card's current state, reused by the deep-link flash
+  // so the glow matches the border instead of always being cyan.
+  const [stateColor, stateGlow] = expenseDeleted
+    ? ['#4b5563', 'rgba(75,85,99,0.55)']
+    : !allSigned
+    ? ['#eab308', 'rgba(234,179,8,0.5)']
+    : isSettlement
+    ? ['#22d3ee', 'rgba(34,211,238,0.5)']
+    : ['#9ca3af', 'rgba(156,163,175,0.45)'];
+
   // Deep-link arrival flash: bright ring for ~1s, then back to normal. The
   // 700ms transition on the card class does the fade-out.
   const [highlighted, setHighlighted] = useState(highlight);
@@ -257,23 +267,31 @@ export function ExpenseCard({
       // this div into the containing block for the fixed-position modals.
       style={{
         touchAction: 'pan-y',
+        // Inline so it beats the Tailwind shadow classes deterministically:
+        // the deep-link flash glows in the card's own state color.
+        ...(highlighted
+          ? {
+              borderColor: stateColor,
+              boxShadow: `0 0 0 2px ${stateColor}, 0 0 26px 4px ${stateGlow}`,
+            }
+          : {}),
         ...(swipeX !== 0 || dragging
           ? { transform: `translateX(${swipeX}px)`, transition: dragging ? 'none' : 'transform 200ms ease' }
           : {}),
       }}
-      className={`${dragging ? 'select-none ' : ''}relative bg-gray-800 rounded-lg shadow-sm border p-4 cursor-pointer transition-all ${highlighted ? 'duration-150' : 'duration-700'} ${
+      className={`${dragging ? 'select-none ' : ''}relative rounded-lg shadow-sm border p-4 cursor-pointer transition-all ${highlighted ? 'duration-150' : 'duration-700'} ${
         // Pending (yellow) outranks the type colors — an unaccepted
-        // settlement is still pending first, cyan second. Hover only
-        // brightens the border and spreads a shadow; no lift, which would
-        // clip against the swipe container's overflow.
+        // settlement is still pending first, cyan second. Hover brightens the
+        // border, lifts the background a step, and spreads a glow; no
+        // translate, which would clip against the swipe container's overflow.
         expenseDeleted
-          ? 'border-gray-700 hover:border-gray-500 hover:shadow-[0_0_18px_rgba(55,65,81,0.35)]'
+          ? 'bg-gray-800 border-gray-800 hover:border-gray-600 hover:bg-gray-700/60 hover:shadow-[0_0_18px_rgba(55,65,81,0.4)]'
           : !allSigned
-          ? 'border-yellow-700 hover:border-yellow-400 hover:shadow-[0_0_18px_rgba(202,138,4,0.35)]'
+          ? 'bg-gray-800 border-yellow-800 hover:border-yellow-500 hover:bg-gray-700/60 hover:shadow-[0_0_18px_rgba(202,138,4,0.4)]'
           : isSettlement
-          ? 'border-cyan-600 hover:border-cyan-300 hover:shadow-[0_0_18px_rgba(8,145,178,0.4)]'
-          : 'border-gray-500 hover:border-gray-300 hover:shadow-[0_0_18px_rgba(156,163,175,0.3)]'
-      } ${highlighted ? 'ring-2 ring-cyan-300 shadow-[0_0_22px_rgba(103,232,249,0.55)]' : ''} ${expenseDeleted ? 'opacity-60' : ''}`}
+          ? 'bg-gray-800 border-cyan-800 hover:border-cyan-400 hover:bg-gray-700/60 hover:shadow-[0_0_18px_rgba(8,145,178,0.45)]'
+          : 'bg-gray-800 border-gray-700 hover:border-gray-400 hover:bg-gray-700/60 hover:shadow-[0_0_18px_rgba(156,163,175,0.35)]'
+      } ${expenseDeleted ? 'opacity-60' : ''}`}
     >
       <div className="flex justify-between items-start mb-2">
         <div className="flex-1">
