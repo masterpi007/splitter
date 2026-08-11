@@ -360,9 +360,20 @@ export function ExpenseCard({
                   e.stopPropagation();
                   setEditingTags(true);
                 }}
-                className="text-xs text-gray-500 hover:text-gray-300 min-h-[28px] px-1.5 flex items-center"
+                className="text-gray-500 hover:text-gray-300 min-h-[28px] px-1 flex items-center"
+                title="Add tag"
+                aria-label="Add tag"
               >
-                + tag
+                {/* tag outline with a + in the body */}
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0l-7.2-7.2A2 2 0 0 1 2.8 12V4.8A2 2 0 0 1 4.8 2.8H12a2 2 0 0 1 1.4.6l7.2 7.2a2 2 0 0 1 0 2.8Z"
+                  />
+                  <circle cx="7.4" cy="7.4" r="1.1" fill="currentColor" stroke="none" />
+                  <path strokeLinecap="round" d="M11.4 11.4v4.4M9.2 13.6h4.4" />
+                </svg>
               </button>
             )}
             {editingTags && (

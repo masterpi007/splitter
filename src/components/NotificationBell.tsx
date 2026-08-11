@@ -246,8 +246,11 @@ export function NotificationBell() {
         )}
       </button>
 
+      {/* Full-width sheet on phones; on wider screens anchored under the bell
+          itself rather than pinned to the viewport edge, which left it
+          floating far from the button once the header became centred. */}
       {open && (
-        <div className="fixed right-2 left-2 sm:left-auto sm:right-2 sm:w-80 top-16 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 flex flex-col overflow-hidden"
+        <div className="fixed left-2 right-2 top-16 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 flex flex-col overflow-hidden"
           style={{ maxHeight: 'calc(100vh - 5rem)' }}>
 
           {/* Sliding panels wrapper */}
