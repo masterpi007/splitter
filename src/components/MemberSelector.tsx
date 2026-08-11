@@ -9,7 +9,7 @@ import type { Member } from '../types';
 type AuthFlow = 'signin' | 'register' | 'edit-profile' | null;
 
 export function MemberSelector() {
-  const { group, currentUser, setCurrentUser, updateProfile } = useApp();
+  const { group, currentUser, setCurrentUser, updateProfile, refreshGroups, refreshData } = useApp();
   const {
     authenticated,
     session,
@@ -57,6 +57,12 @@ export function MemberSelector() {
     setAuthFlow('signin');
     try {
       await authenticate();
+      // The app booted unauthenticated, so groups/expenses state is empty —
+      // refetch now that the session cookie is live. Sequential on purpose:
+      // refreshGroups fixes/clears the active group id (possibly left over
+      // from another user on this browser) BEFORE refreshData reads it.
+      await refreshGroups();
+      await refreshData();
       setAuthFlow(null);
     } catch {
       // Error shown in UI
@@ -74,6 +80,11 @@ export function MemberSelector() {
       // After sign-in, the user creates their first group via /groups/new.
       const userId = crypto.randomUUID();
       await register(userId, newName.trim());
+      // Sequential: a fresh user has no groups, and refreshGroups clears any
+      // stale active-group id (e.g. another user used this browser) before
+      // refreshData would load that group.
+      await refreshGroups();
+      await refreshData();
       setNewName('');
       setAuthFlow(null);
     } catch (err) {
@@ -155,7 +166,14 @@ export function MemberSelector() {
 
         <ProfileModal
           isOpen={authFlow === 'edit-profile'}
-          currentUser={currentUser}
+          // Users without a group yet still have a session identity — feed the
+          // modal a synthetic member so name/avatar aren't blank.
+          currentUser={
+            currentUser ??
+            (session
+              ? { id: session.userId, userId: session.userId, name: session.userName }
+              : null)
+          }
           onClose={handleCloseModal}
           onSave={handleProfileSave}
           onLogout={handleLogout}
@@ -172,16 +190,33 @@ export function MemberSelector() {
         <button
           onClick={handleSignIn}
           disabled={webAuthnLoading}
-          className="px-3 py-1 bg-cyan-600 text-white text-sm rounded hover:bg-cyan-700 disabled:opacity-50"
+          title="Sign in"
+          aria-label="Sign in"
+          className="p-1.5 bg-cyan-600 text-white rounded hover:bg-cyan-700 disabled:opacity-50"
         >
-          {webAuthnLoading && authFlow === 'signin' ? 'Signing in...' : 'Sign In'}
+          {webAuthnLoading && authFlow === 'signin' ? (
+            <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+          ) : (
+            /* login: arrow into door */
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+            </svg>
+          )}
         </button>
         <button
           onClick={() => setAuthFlow('register')}
           disabled={webAuthnLoading}
-          className="text-cyan-400 text-sm font-medium hover:text-cyan-300 disabled:opacity-50"
+          title="New user"
+          aria-label="New user"
+          className="p-1.5 text-cyan-400 hover:text-cyan-300 disabled:opacity-50"
         >
-          New User
+          {/* user-plus */}
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+          </svg>
         </button>
       </div>
 

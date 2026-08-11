@@ -195,7 +195,16 @@ export function ExpenseView() {
               const member = allGroupMembers.find((m) => m.id === memberId);
               const isYou = currentUser && memberId === currentUser.id;
               return (
-                <div key={memberId} className="flex flex-col items-center gap-1 w-16">
+                <div
+                  key={memberId}
+                  title={signed ? 'Confirmed' : 'Pending'}
+                  // Cell color carries the sign-off state: yellow = pending.
+                  className={`flex flex-col items-center gap-1 w-[4.75rem] rounded-lg border px-1.5 py-2 ${
+                    signed
+                      ? 'bg-gray-700/40 border-gray-600'
+                      : 'bg-yellow-900/30 border-yellow-700'
+                  }`}
+                >
                   <img
                     src={memberAvatarUrl(member ?? { name: getMemberName(memberId) })}
                     alt=""
@@ -206,9 +215,6 @@ export function ExpenseView() {
                   </span>
                   <span className="text-xs text-gray-200 font-medium whitespace-nowrap">
                     {formatCurrency(amount, currency)}
-                  </span>
-                  <span className="text-xs" title={signed ? 'Confirmed' : 'Pending'}>
-                    {signed ? '✅' : '⏳'}
                   </span>
                 </div>
               );

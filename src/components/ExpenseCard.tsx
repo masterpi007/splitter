@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Expense, Member } from '../types';
 import { calculateBillGoc, calculateDiscountAmount, formatCurrency, formatRelativeTime, getTagColor, isDeleted, isGroupAccepted } from '../utils/balances';
@@ -14,6 +14,8 @@ interface ExpenseCardProps {
   showSignOff?: boolean;
   onDelete?: () => void;
   initialExpanded?: boolean;
+  /** One-time swipe-discovery nudge: briefly peeks the action column. */
+  swipeHint?: boolean;
 }
 
 export function ExpenseCard({
@@ -23,6 +25,7 @@ export function ExpenseCard({
   showSignOff = false,
   onDelete,
   initialExpanded = false,
+  swipeHint = false,
 }: ExpenseCardProps) {
   const { group, currentUser, updateExpense, claimExpenseItem, deleteExpense, tagsByFrequency } = useApp();
   const navigate = useNavigate();
@@ -155,6 +158,21 @@ export function ExpenseCard({
     setDragging(false);
     setSwipeX((x) => (x < -actionWidth / 2 ? -actionWidth : 0));
   };
+
+  // One-time discovery nudge: peek the actions open and snap back so users
+  // learn the swipe exists. Runs once per browser (localStorage flag).
+  useEffect(() => {
+    if (!swipeHint || actionWidth === 0) return;
+    if (localStorage.getItem('splitter.swipeHintShown')) return;
+    localStorage.setItem('splitter.swipeHintShown', '1');
+    const open = setTimeout(() => setSwipeX(-actionWidth), 700);
+    const close = setTimeout(() => setSwipeX(0), 1900);
+    return () => {
+      clearTimeout(open);
+      clearTimeout(close);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [swipeHint, actionWidth]);
 
   const handleCardClick = () => {
     if (swipedRef.current) {

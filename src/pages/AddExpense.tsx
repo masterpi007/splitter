@@ -9,7 +9,7 @@ import { roundNumber, getTagColor, calculateDiscountAmount, calculateBillGoc, di
 import { YouBadge } from '../components/YouBadge';
 import { ShareControl } from '../components/ShareControl';
 import { AmountInput } from '../components/AmountInput';
-import { MemberSelect } from '../components/MemberSelect';
+import { MemberSelect, memberAvatarUrl } from '../components/MemberSelect';
 
 export function AddExpense() {
   const navigate = useNavigate();
@@ -713,13 +713,18 @@ export function AddExpense() {
                     draggable
                     onClick={() => handleMemberTap(member.id)}
                     onDragStart={(e) => handleMemberDragStart(e, member.id)}
-                    className={`px-3 py-1.5 rounded-full text-sm cursor-grab active:cursor-grabbing select-none transition-colors ${
-                      isIncluded
-                        ? 'bg-cyan-600 text-white hover:bg-red-500'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
+                    className="flex flex-col items-center gap-1 w-14 cursor-grab active:cursor-grabbing select-none"
                   >
-                    {member.name}{isYou && <> <YouBadge /></>}
+                    <img
+                      src={memberAvatarUrl(member)}
+                      alt=""
+                      className={`w-11 h-11 rounded-full bg-gray-700 transition-all ${
+                        isIncluded ? 'ring-2 ring-cyan-500' : 'opacity-40 grayscale'
+                      }`}
+                    />
+                    <span className={`text-xs truncate max-w-full ${isYou ? 'text-amber-400 font-medium' : isIncluded ? 'text-gray-200' : 'text-gray-500'}`}>
+                      {isYou ? 'You' : member.name}
+                    </span>
                   </div>
                 );
               })}

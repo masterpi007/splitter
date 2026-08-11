@@ -11,6 +11,9 @@ import { LEGACY_GROUP_ID, getGroup, findMember } from './groups';
 export interface User {
   id: string;
   name: string;
+  // Global avatar identity — copied onto new member rows at group join and
+  // kept in sync by profile saves, so the avatar follows the user everywhere.
+  avatarSeed?: string;
   createdAt: string;
 }
 

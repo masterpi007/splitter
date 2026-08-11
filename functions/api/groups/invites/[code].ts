@@ -2,7 +2,7 @@ import type { AuthEnv } from '../../types/auth';
 import { requireSession, requireGroupAdmin } from '../../utils/session';
 import { getInvite, deleteInvite } from '../../utils/invites';
 import { getGroup, saveGroup, GroupMember } from '../../utils/groups';
-import { addMembership, isUserMemberOfGroup } from '../../utils/users';
+import { addMembership, isUserMemberOfGroup, getUser } from '../../utils/users';
 import { acquireLock } from '../../utils/locks';
 
 // GET /api/groups/invites/:code — preview an invite (used by the accept-invite
@@ -104,6 +104,9 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
       let memberId: string;
       let memberName: string;
 
+      // The user's global avatar follows them into the new group.
+      const joiningUser = await getUser(context.env, authed.session.userId);
+
       if (placeholderIdx !== -1) {
         const placeholder = group.members[placeholderIdx];
         memberId = placeholder.id;
@@ -111,6 +114,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
         group.members[placeholderIdx] = {
           ...placeholder,
           userId: authed.session.userId,
+          ...(joiningUser?.avatarSeed && { avatarSeed: joiningUser.avatarSeed }),
           joinedAt: placeholder.joinedAt ?? now,
         };
       } else {
@@ -126,6 +130,7 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
           id: crypto.randomUUID(),
           userId: authed.session.userId,
           name: uniqueName,
+          ...(joiningUser?.avatarSeed && { avatarSeed: joiningUser.avatarSeed }),
           joinedAt: now,
         };
         group.members.push(newMember);

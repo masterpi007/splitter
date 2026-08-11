@@ -118,8 +118,15 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
       await saveGroup(context.env, updatedGroup);
 
       const user = await getUser(context.env, session.userId);
-      if (user && user.name !== trimmedName) {
-        await saveUser(context.env, { ...user, name: trimmedName });
+      if (
+        user &&
+        (user.name !== trimmedName || (avatarSeed !== undefined && user.avatarSeed !== avatarSeed))
+      ) {
+        await saveUser(context.env, {
+          ...user,
+          name: trimmedName,
+          ...(avatarSeed !== undefined && { avatarSeed }),
+        });
       }
 
       // Name and avatar follow the user everywhere; bank stays per-group.
@@ -148,7 +155,11 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
       return Response.json({ success: false, error: 'User not found' }, { status: 404 });
     }
 
-    await saveUser(context.env, { ...user, name: trimmedName });
+    await saveUser(context.env, {
+      ...user,
+      name: trimmedName,
+      ...(avatarSeed !== undefined && { avatarSeed }),
+    });
 
     await propagateIdentity(context.env, session.userId, { name: trimmedName, avatarSeed });
 
