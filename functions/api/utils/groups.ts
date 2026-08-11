@@ -189,6 +189,19 @@ export interface GroupSignOff {
   signedAt: string;
 }
 
+export interface ExpenseHistoryChange {
+  field: string;
+  from?: unknown;
+  to?: unknown;
+}
+
+// One recorded edit; creation and sign-offs are derived client-side instead.
+export interface ExpenseHistoryEntry {
+  at: string;
+  by: string; // member id of the editor
+  changes: ExpenseHistoryChange[];
+}
+
 export interface Expense {
   id: string;
   description: string;
@@ -203,6 +216,10 @@ export interface Expense {
   receiptUrl?: string;
   receiptDate?: string;
   tags?: string[];
+  discount?: number;
+  discountType?: string;
+  // Recorded edits, server-appended in the PUT handler, capped at 50.
+  history?: ExpenseHistoryEntry[];
 }
 
 export async function getExpenses(env: AuthEnv, groupId: string): Promise<unknown[]> {

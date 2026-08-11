@@ -76,6 +76,53 @@ export function ExpenseView() {
     settlement: 'Settlement',
   };
 
+  // --- Activity timeline: creation + sign-offs derived from live data,
+  // edits from the server-recorded history (recording started 2026-08). ---
+  const describeChange = (c: { field: string; from?: unknown; to?: unknown }): string => {
+    const money = (v: unknown) => (typeof v === 'number' ? formatCurrency(v, currency) : '—');
+    if (c.field === 'amount') return `amount ${money(c.from)} → ${money(c.to)}`;
+    if (c.field === 'description') return `description "${c.from ?? ''}" → "${c.to ?? ''}"`;
+    if (c.field === 'paidBy') return `payer ${getMemberName(String(c.from))} → ${getMemberName(String(c.to))}`;
+    if (c.field === 'splitType') return `split type ${c.from} → ${c.to}`;
+    if (c.field === 'discount' || c.field === 'discountType') return `discount ${c.from ?? 'none'} → ${c.to ?? 'none'}`;
+    if (c.field === 'receiptDate') return `date ${c.from ?? '—'} → ${c.to ?? '—'}`;
+    if (c.field === 'deleted') return 'deleted the transaction';
+    if (c.field === 'restored') return 'restored the transaction';
+    if (c.field.startsWith('split:')) {
+      const who = getMemberName(c.field.slice(6));
+      if (c.from === undefined) return `added ${who}'s share (${money(c.to)})`;
+      if (c.to === undefined) return `removed ${who}'s share`;
+      return `${who}'s share ${money(c.from)} → ${money(c.to)}`;
+    }
+    return c.field;
+  };
+
+  const activity: { at: string; icon: string; text: string }[] = [
+    {
+      at: expense.createdAt,
+      icon: '➕',
+      text: `${getMemberName(expense.createdBy ?? expense.paidBy)} created this transaction`,
+    },
+    ...(isGroupMode
+      ? (expense.signedOffBy ?? []).map((s) => ({
+          at: s.signedAt,
+          icon: '✅',
+          text: `${getMemberName(s.memberId)} accepted`,
+        }))
+      : expense.splits
+          .filter((s) => s.signedOff && s.signedAt)
+          .map((s) => ({
+            at: s.signedAt as string,
+            icon: '✅',
+            text: `${getMemberName(s.memberId)} accepted`,
+          }))),
+    ...(expense.history ?? []).map((h) => ({
+      at: h.at,
+      icon: '✏️',
+      text: `${getMemberName(h.by)} edited: ${h.changes.map(describeChange).join('; ')}`,
+    })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
+
   const handleDelete = async () => {
     setShowDeleteConfirm(false);
     setDeleting(true);
@@ -196,6 +243,22 @@ export function ExpenseView() {
             </button>
           </div>
         )}
+      </div>
+
+      {/* Activity timeline */}
+      <div className="mt-4 bg-gray-800 rounded-lg border border-gray-700 p-5">
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Activity</p>
+        <div className="space-y-2.5">
+          {activity.map((ev, i) => (
+            <div key={i} className="flex items-start gap-2 text-sm">
+              <span className="shrink-0">{ev.icon}</span>
+              <p className="text-gray-300 leading-snug">
+                {ev.text}
+                <span className="text-gray-500 text-xs ml-2 whitespace-nowrap">{formatRelativeTime(ev.at)}</span>
+              </p>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Footer actions */}

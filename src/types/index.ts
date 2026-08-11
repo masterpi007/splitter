@@ -89,6 +89,21 @@ export interface GroupSignOff {
   signedAt: string;
 }
 
+// One recorded edit on an expense. Creation and sign-offs are NOT recorded
+// here — the activity view derives them from createdAt/createdBy and the
+// sign-off timestamps, so old expenses still get a timeline.
+export interface ExpenseHistoryChange {
+  field: string; // 'amount' | 'description' | 'paidBy' | 'splitType' | 'discount' | 'receiptDate' | `split:<memberId>` | 'deleted' | 'restored'
+  from?: unknown;
+  to?: unknown;
+}
+
+export interface ExpenseHistoryEntry {
+  at: string; // ISO timestamp
+  by: string; // member id of the editor
+  changes: ExpenseHistoryChange[];
+}
+
 // Expense with sign-off tracking
 export interface Expense {
   id: string;
@@ -101,6 +116,8 @@ export interface Expense {
   // Sign-off ledger for group-mode expenses (splits are computed on read, so
   // signedOff cannot live on each split). Empty/absent on non-group expenses.
   signedOffBy?: GroupSignOff[];
+  // Recorded edits (server-appended, capped). See ExpenseHistoryEntry.
+  history?: ExpenseHistoryEntry[];
   items?: ReceiptItem[]; // stored items for editing later
   discount?: number; // percentage value OR flat amount, depending on discountType
   discountType?: DiscountType; // default 'percentage' for backward compat

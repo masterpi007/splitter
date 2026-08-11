@@ -18,6 +18,35 @@ import { acquireLockWithRetry } from '../utils/locks';
 // Fields that rewrite the "truth" of an expense (amount, attribution). Only
 // the original creator or a group admin can change these; anyone else can
 // still sign off their own split, claim items, or adjust descriptive tags.
+// Diff the fields worth showing in the activity timeline. Sign-off flips are
+// deliberately excluded — the client derives those from sign-off timestamps.
+function diffExpenseForHistory(before: Expense, after: Expense) {
+  const changes: { field: string; from?: unknown; to?: unknown }[] = [];
+  const scalarFields = ['description', 'amount', 'paidBy', 'splitType', 'discount', 'discountType', 'receiptDate'] as const;
+  for (const f of scalarFields) {
+    if (before[f] !== after[f] && (before[f] !== undefined || after[f] !== undefined)) {
+      changes.push({ field: f, from: before[f], to: after[f] });
+    }
+  }
+  // Per-member share changes (skip group mode — its splits are ephemeral).
+  if (after.splitType !== 'group') {
+    const beforeAmounts = new Map((before.splits ?? []).map((s) => [s.memberId, s.amount]));
+    const afterAmounts = new Map((after.splits ?? []).map((s) => [s.memberId, s.amount]));
+    const ids = new Set([...beforeAmounts.keys(), ...afterAmounts.keys()]);
+    for (const id of ids) {
+      const b = beforeAmounts.get(id);
+      const a = afterAmounts.get(id);
+      if (b !== a) changes.push({ field: `split:${id}`, from: b, to: a });
+    }
+  }
+  const wasDeleted = before.tags?.includes('deleted') ?? false;
+  const nowDeleted = after.tags?.includes('deleted') ?? false;
+  if (wasDeleted !== nowDeleted) changes.push({ field: nowDeleted ? 'deleted' : 'restored' });
+  return changes;
+}
+
+const HISTORY_CAP = 50;
+
 function structuralFieldsChanged(before: Expense, after: Expense): boolean {
   return (
     before.amount !== after.amount ||
@@ -155,6 +184,8 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
         ...updates,
         id: before.id,
         createdAt: before.createdAt,
+        // History is server-owned — never accept it from the client.
+        history: before.history,
       };
       const structural = structuralFieldsChanged(before, merged);
       if (structural && !canEditExpenseStructurally(group, before, member)) {
@@ -169,6 +200,14 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
           return Response.json({ success: false, error: validationError }, { status: 400 });
         }
       }
+      const historyChanges = diffExpenseForHistory(before, merged);
+      if (historyChanges.length > 0) {
+        merged.history = [
+          ...(before.history ?? []),
+          { at: new Date().toISOString(), by: member.id, changes: historyChanges },
+        ].slice(-HISTORY_CAP);
+      }
+
       expenses[index] = merged;
       const updatedExpense = merged;
       await saveExpenses(context.env, group.id, expenses);
