@@ -9,6 +9,7 @@ import { roundNumber, getTagColor, calculateDiscountAmount, calculateBillGoc, di
 import { YouBadge } from '../components/YouBadge';
 import { ShareControl } from '../components/ShareControl';
 import { AmountInput } from '../components/AmountInput';
+import { MemberSelect } from '../components/MemberSelect';
 
 export function AddExpense() {
   const navigate = useNavigate();
@@ -661,18 +662,15 @@ export function AddExpense() {
           <label className="block text-sm font-medium text-gray-300 mb-1">
             {splitMode === 'settlement' ? 'From (sender)' : 'Paid by'}
           </label>
-          <select
+          <MemberSelect
+            members={group.members}
             value={paidBy}
-            onChange={(e) => setPaidBy(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-100"
-          >
-            <option value="">Select who paid</option>
-            {group.members.map((member) => (
-              <option key={member.id} value={member.id}>
-                {member.name}
-              </option>
-            ))}
-          </select>
+            onChange={(id) => {
+              setPaidBy(id);
+              if (settleTo === id) setSettleTo('');
+            }}
+            placeholder="Select who paid"
+          />
         </div>
 
         {splitMode !== 'group' && splitMode !== 'settlement' && (
@@ -861,20 +859,13 @@ export function AddExpense() {
             <label className="block text-sm font-medium text-gray-300 mb-1">
               To (recipient)
             </label>
-            <select
+            <MemberSelect
+              members={group.members}
               value={settleTo}
-              onChange={(e) => setSettleTo(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-100"
-            >
-              <option value="">Select who receives the money</option>
-              {group.members
-                .filter((member) => member.id !== paidBy)
-                .map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.name}
-                  </option>
-                ))}
-            </select>
+              onChange={setSettleTo}
+              placeholder="Select who receives the money"
+              excludeId={paidBy}
+            />
             <p className="mt-1.5 text-xs text-gray-500">
               Records a money transfer between members — doesn't count as
               spending. The recipient confirms receipt. Description is optional.

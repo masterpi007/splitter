@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Expense, Member } from '../types';
 import { calculateBillGoc, calculateDiscountAmount, formatCurrency, formatRelativeTime, getTagColor, isDeleted, isGroupAccepted } from '../utils/balances';
@@ -116,24 +116,106 @@ export function ExpenseCard({
   const canDelete = isPayer || isCreator || isAdmin;
   const canEditTags = isParticipant || isAdmin;
 
+  // Swipe-left reveals Edit/Delete under the card (touch devices). Desktop
+  // reaches the same actions through the transaction detail page.
+  const canSwipeEdit = !expenseDeleted && !isSettlement && (isParticipant || isAdmin);
+  const canSwipeDelete = !!canDelete && !expenseDeleted;
+  const actionWidth = (canSwipeEdit ? 72 : 0) + (canSwipeDelete ? 72 : 0);
+  const [swipeX, setSwipeX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const startOffset = useRef(0);
+  const swipedRef = useRef(false);
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (actionWidth === 0) return;
+    touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    startOffset.current = swipeX;
+    swipedRef.current = false;
+    setDragging(true);
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (!touchStart.current) return;
+    const dx = e.touches[0].clientX - touchStart.current.x;
+    const dy = e.touches[0].clientY - touchStart.current.y;
+    if (Math.abs(dy) > Math.abs(dx)) return; // vertical scroll wins
+    if (Math.abs(dx) > 8) swipedRef.current = true;
+    setSwipeX(Math.min(0, Math.max(-actionWidth, startOffset.current + dx)));
+  };
+  const onTouchEnd = () => {
+    touchStart.current = null;
+    setDragging(false);
+    setSwipeX((x) => (x < -actionWidth / 2 ? -actionWidth : 0));
+  };
+
+  const handleCardClick = () => {
+    if (swipedRef.current) {
+      swipedRef.current = false;
+      return;
+    }
+    if (swipeX !== 0) {
+      setSwipeX(0);
+      return;
+    }
+    openExpenseView();
+  };
+
   return (
+    <div className="relative overflow-hidden rounded-lg">
+      {/* Action layer revealed by swiping left */}
+      {actionWidth > 0 && (
+        <div className="absolute inset-y-0 right-0 flex">
+          {canSwipeEdit && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/edit/${expense.id}`);
+              }}
+              className="w-[72px] flex items-center justify-center bg-cyan-700 text-white text-sm font-medium"
+            >
+              Edit
+            </button>
+          )}
+          {canSwipeDelete && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSwipeX(0);
+                handleDelete();
+              }}
+              disabled={deleting}
+              className="w-[72px] flex items-center justify-center bg-red-600 text-white text-sm font-medium disabled:opacity-50"
+            >
+              {deleting ? '…' : 'Delete'}
+            </button>
+          )}
+        </div>
+      )}
     <div
       role="link"
       tabIndex={0}
-      onClick={openExpenseView}
+      onClick={handleCardClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           openExpenseView();
         }
       }}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      // Only set a transform while swiping — a permanent transform would turn
+      // this div into the containing block for the fixed-position modals.
+      style={swipeX !== 0 || dragging ? { transform: `translateX(${swipeX}px)`, transition: dragging ? 'none' : 'transform 200ms ease' } : undefined}
       className={`bg-gray-800 rounded-lg shadow-sm border p-4 cursor-pointer transition-all duration-150 ${
         expenseDeleted
           ? 'border-gray-700 hover:shadow-[0_0_0_1px_rgba(55,65,81,0.45),0_10px_30px_rgba(55,65,81,0.12)]'
           : isSettlement
           ? 'border-cyan-600 hover:shadow-[0_0_0_1px_rgba(8,145,178,0.5),0_10px_30px_rgba(8,145,178,0.18)]'
           : allSigned
-          ? 'border-white/60 hover:shadow-[0_0_0_1px_rgba(255,255,255,0.4),0_10px_30px_rgba(255,255,255,0.10)]'
+          ? 'border-gray-500 hover:shadow-[0_0_0_1px_rgba(107,114,128,0.5),0_10px_30px_rgba(107,114,128,0.14)]'
           : 'border-yellow-700 hover:shadow-[0_0_0_1px_rgba(161,98,7,0.45),0_10px_30px_rgba(161,98,7,0.14)]'
       } hover:-translate-y-0.5 ${expenseDeleted ? 'opacity-60' : ''}`}
     >
@@ -145,18 +227,6 @@ export function ExpenseCard({
                 <span className="text-xs px-2 py-0.5 rounded-full bg-green-900 text-green-300">
                   Settlement
                 </span>
-                {canDelete && !expenseDeleted && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete();
-                    }}
-                    disabled={deleting}
-                    className="text-red-400 text-xs hover:text-red-300 disabled:opacity-50"
-                  >
-                    {deleting ? 'Deleting...' : 'Delete'}
-                  </button>
-                )}
               </div>
               <p className="text-sm mt-2">
                 <span className="text-gray-100">{getMemberName(payer?.id ?? '')}</span>
@@ -674,21 +744,7 @@ export function ExpenseCard({
         </div>
       )}
 
-      {canDelete && !isSettlement && !expenseDeleted && (
-        <div className="mt-3 pt-3 border-t border-gray-700">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDelete();
-            }}
-            disabled={deleting}
-            className="text-red-400 text-sm hover:text-red-300 disabled:opacity-50"
-          >
-            {deleting ? 'Deleting...' : 'Delete transaction'}
-          </button>
-          {deleteError && <p className="text-red-400 text-xs mt-1">{deleteError}</p>}
-        </div>
-      )}
+      {deleteError && <p className="text-red-400 text-xs mt-2">{deleteError}</p>}
 
       <div className="flex justify-between items-center mt-3">
         <p className="text-xs text-gray-500">
@@ -749,6 +805,7 @@ export function ExpenseCard({
         onConfirm={handleConfirmDelete}
         onCancel={() => setShowDeleteConfirm(false)}
       />
+    </div>
     </div>
   );
 }

@@ -191,24 +191,29 @@ export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser
       </div>
 
       {availableTags.length > 0 && (
-        <div ref={tagMenuRef} className="relative mb-2">
+        <div ref={tagMenuRef} className="relative mb-2 flex justify-end">
           <button
             type="button"
             onClick={() => setTagMenuOpen((v) => !v)}
-            className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+            title="Filter by tags"
+            className={`relative p-1.5 rounded-md border transition-colors ${
               selectedTags.size > 0
                 ? 'border-cyan-500 text-cyan-300 bg-cyan-600/10'
-                : 'border-gray-700 text-gray-400 bg-gray-900 hover:border-gray-500'
+                : 'border-gray-700 text-gray-500 bg-gray-900 hover:border-gray-500 hover:text-gray-300'
             }`}
           >
-            {selectedTags.size === 0
-              ? 'Filter by tags ▾'
-              : `Tags: ${[...selectedTags].slice(0, 2).join(', ')}${
-                  selectedTags.size > 2 ? ` +${selectedTags.size - 2}` : ''
-                } ▾`}
+            {/* funnel icon */}
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 5h18l-7 8v5l-4 2v-7L3 5z" />
+            </svg>
+            {selectedTags.size > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 bg-cyan-500 text-gray-900 text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                {selectedTags.size}
+              </span>
+            )}
           </button>
           {tagMenuOpen && (
-            <div className="absolute z-10 mt-1 w-56 max-h-56 overflow-y-auto bg-gray-800 border border-gray-600 rounded-lg shadow-xl">
+            <div className="absolute right-0 top-full z-10 mt-1 w-56 max-h-56 overflow-y-auto bg-gray-800 border border-gray-600 rounded-lg shadow-xl">
               {selectedTags.size > 0 && (
                 <>
                   <button
