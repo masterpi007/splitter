@@ -118,9 +118,10 @@ export function ExpenseCard({
 
   // Swipe-left reveals Edit/Delete under the card (touch devices). Desktop
   // reaches the same actions through the transaction detail page.
-  const canSwipeEdit = !expenseDeleted && !isSettlement && (isParticipant || isAdmin);
+  const canSwipeEdit = !expenseDeleted && (isParticipant || isAdmin);
   const canSwipeDelete = !!canDelete && !expenseDeleted;
-  const actionWidth = (canSwipeEdit ? 72 : 0) + (canSwipeDelete ? 72 : 0);
+  // Actions stack vertically in a single 64px-wide column.
+  const actionWidth = canSwipeEdit || canSwipeDelete ? 64 : 0;
   const [swipeX, setSwipeX] = useState(0);
   const [dragging, setDragging] = useState(false);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
@@ -162,9 +163,10 @@ export function ExpenseCard({
 
   return (
     <div className="relative overflow-hidden rounded-lg">
-      {/* Action layer revealed by swiping left */}
-      {actionWidth > 0 && (
-        <div className="absolute inset-y-0 right-0 flex">
+      {/* Action layer — only exists while the card is being dragged or held
+          open, and stacks Edit above Delete as icon buttons. */}
+      {actionWidth > 0 && (dragging || swipeX < 0) && (
+        <div className="absolute inset-y-0 right-0 flex flex-col w-16">
           {canSwipeEdit && (
             <button
               type="button"
@@ -172,9 +174,12 @@ export function ExpenseCard({
                 e.stopPropagation();
                 navigate(`/edit/${expense.id}`);
               }}
-              className="w-[72px] flex items-center justify-center bg-cyan-700 text-white text-sm font-medium"
+              title="Edit"
+              className="flex-1 flex items-center justify-center bg-cyan-700 text-white"
             >
-              Edit
+              <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+              </svg>
             </button>
           )}
           {canSwipeDelete && (
@@ -186,9 +191,12 @@ export function ExpenseCard({
                 handleDelete();
               }}
               disabled={deleting}
-              className="w-[72px] flex items-center justify-center bg-red-600 text-white text-sm font-medium disabled:opacity-50"
+              title="Delete"
+              className="flex-1 flex items-center justify-center bg-red-600 text-white disabled:opacity-50"
             >
-              {deleting ? '…' : 'Delete'}
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
             </button>
           )}
         </div>
@@ -209,7 +217,7 @@ export function ExpenseCard({
       // Only set a transform while swiping — a permanent transform would turn
       // this div into the containing block for the fixed-position modals.
       style={swipeX !== 0 || dragging ? { transform: `translateX(${swipeX}px)`, transition: dragging ? 'none' : 'transform 200ms ease' } : undefined}
-      className={`bg-gray-800 rounded-lg shadow-sm border p-4 cursor-pointer transition-all duration-150 ${
+      className={`relative bg-gray-800 rounded-lg shadow-sm border p-4 cursor-pointer transition-all duration-150 ${
         expenseDeleted
           ? 'border-gray-700 hover:shadow-[0_0_0_1px_rgba(55,65,81,0.45),0_10px_30px_rgba(55,65,81,0.12)]'
           : isSettlement

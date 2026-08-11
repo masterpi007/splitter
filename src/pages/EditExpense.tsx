@@ -8,6 +8,7 @@ import { roundNumber, calculateDiscountAmount, calculateBillGoc, distributeBySha
 import { YouBadge } from '../components/YouBadge';
 import { ShareControl } from '../components/ShareControl';
 import { AmountInput } from '../components/AmountInput';
+import { MemberSelect } from '../components/MemberSelect';
 
 export function EditExpense() {
   const navigate = useNavigate();
@@ -29,7 +30,8 @@ export function EditExpense() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [splitMode, setSplitMode] = useState<'items' | 'shares' | 'group'>('items');
+  const [splitMode, setSplitMode] = useState<'items' | 'shares' | 'group' | 'settlement'>('items');
+  const [settleTo, setSettleTo] = useState('');
   const [memberShares, setMemberShares] = useState<Record<string, number>>({});
 
   // Initialize form with existing expense data
@@ -43,7 +45,10 @@ export function EditExpense() {
       setReceiptDate(expense.receiptDate ?? expense.createdAt);
       if (expense.discount) setShowDiscountInput(true);
 
-      if (expense.splitType === 'group') {
+      if (expense.splitType === 'settlement') {
+        setSplitMode('settlement');
+        setSettleTo(expense.splits[0]?.memberId ?? '');
+      } else if (expense.splitType === 'group') {
         setSplitMode('group');
       } else if (expense.splitType === 'shares') {
         setSplitMode('shares');
@@ -365,7 +370,7 @@ export function EditExpense() {
     e.preventDefault();
     setError(null);
 
-    if (!description.trim()) {
+    if (!description.trim() && splitMode !== 'settlement') {
       setError('Description is required');
       return;
     }
@@ -375,7 +380,11 @@ export function EditExpense() {
       return;
     }
 
-    if (splitMode === 'items') {
+    if (splitMode === 'settlement') {
+      if (totalAmount <= 0) { setError('Amount must be greater than 0'); return; }
+      if (!settleTo) { setError('Select who receives the money'); return; }
+      if (settleTo === paidBy) { setError('Sender and recipient must be different'); return; }
+    } else if (splitMode === 'items') {
       if (totalAmount <= 0) {
         setError('Total amount must be greater than 0');
         return;
@@ -411,6 +420,33 @@ export function EditExpense() {
 
     try {
       const now = new Date().toISOString();
+      if (splitMode === 'settlement') {
+        const oldSplit = expense.splits[0];
+        // Recipient keeps their confirmation only when nothing that matters
+        // changed (same recipient, same amount); otherwise they re-confirm.
+        const unchanged =
+          oldSplit &&
+          oldSplit.memberId === settleTo &&
+          Math.abs(oldSplit.amount - totalAmount) < 0.01;
+        const fromName = group.members.find((m) => m.id === paidBy)?.name ?? 'Unknown';
+        const toName = group.members.find((m) => m.id === settleTo)?.name ?? 'Unknown';
+        await updateExpense(expense.id, {
+          description: description.trim() || `Settlement: ${fromName} → ${toName}`,
+          amount: totalAmount,
+          paidBy,
+          splitType: 'settlement',
+          splits: [{
+            memberId: settleTo,
+            value: totalAmount,
+            amount: totalAmount,
+            signedOff: unchanged ? oldSplit.signedOff : settleTo === currentUser?.id,
+            signedAt: unchanged ? oldSplit.signedAt : settleTo === currentUser?.id ? now : undefined,
+          }],
+          receiptDate: receiptDate || undefined,
+        });
+        navigate('/expenses');
+        return;
+      }
       if (splitMode === 'group') {
         // Group-mode persists no splits (computed on read). Member acceptance
         // lives in `signedOffBy`. By default an edit doesn't touch the ledger
@@ -588,25 +624,41 @@ export function EditExpense() {
         {/* 3. Paid by */}
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-1">
-            Paid by
+            {splitMode === 'settlement' ? 'From (sender)' : 'Paid by'}
           </label>
-          <select
+          <MemberSelect
+            members={group.members}
             value={paidBy}
-            onChange={(e) => setPaidBy(e.target.value)}
-            disabled={canOnlyAssign || canOnlyEditOwnItems}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-100 disabled:opacity-50"
-          >
-            <option value="">Select who paid</option>
-            {group.members.map((member) => (
-              <option key={member.id} value={member.id}>
-                {member.name}
-              </option>
-            ))}
-          </select>
+            onChange={(id) => {
+              if (canOnlyAssign || canOnlyEditOwnItems) return;
+              setPaidBy(id);
+              if (settleTo === id) setSettleTo('');
+            }}
+            placeholder="Select who paid"
+          />
         </div>
 
+        {/* 3b. Settlement recipient */}
+        {splitMode === 'settlement' && (
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              To (recipient)
+            </label>
+            <MemberSelect
+              members={group.members}
+              value={settleTo}
+              onChange={(id) => {
+                if (canOnlyAssign || canOnlyEditOwnItems) return;
+                setSettleTo(id);
+              }}
+              placeholder="Select who receives the money"
+              excludeId={paidBy}
+            />
+          </div>
+        )}
+
         {/* 4. Split between - member chips */}
-        {!canOnlyEditOwnItems && splitMode !== 'group' && (
+        {!canOnlyEditOwnItems && splitMode !== 'group' && splitMode !== 'settlement' && (
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
               Split between
@@ -660,7 +712,7 @@ export function EditExpense() {
               value={totalAmount || undefined}
               disabled={canOnlyAssign || canOnlyEditOwnItems}
               onCommit={(n) => {
-                if (splitMode === 'shares') {
+                if (splitMode === 'shares' || splitMode === 'settlement') {
                   setTotalAmount(n !== null && n >= 0 ? n : 0);
                 } else if (n !== null) {
                   handleTotalChange(String(n));
@@ -727,8 +779,8 @@ export function EditExpense() {
           )}
         </div>
 
-        {/* 7. Split mode toggle - payer only */}
-        {isPayer && (
+        {/* 7. Split mode toggle - payer only; settlements keep their type */}
+        {isPayer && splitMode !== 'settlement' && (
           <div className="flex bg-gray-800 rounded-lg p-0.5">
             <button
               type="button"
@@ -921,7 +973,9 @@ export function EditExpense() {
                 ? items.length === 0
                 : splitMode === 'group'
                   ? totalAmount <= 0
-                  : Object.keys(memberShares).length === 0 || totalAmount <= 0)
+                  : splitMode === 'settlement'
+                    ? totalAmount <= 0 || !settleTo || settleTo === paidBy
+                    : Object.keys(memberShares).length === 0 || totalAmount <= 0)
             }
             className="flex-1 bg-cyan-600 text-white py-3 rounded-lg font-medium hover:bg-cyan-700 disabled:opacity-50"
           >
