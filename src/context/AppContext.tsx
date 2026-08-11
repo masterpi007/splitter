@@ -248,10 +248,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const deleteExpense = useCallback(async (expense: Expense) => {
-    const updated = await api.softDeleteExpense(expense);
-    setExpenses((prev) =>
-      prev.map((e) => (e.id === expense.id ? updated : e))
-    );
+    await api.deleteExpense(expense.id);
+    setExpenses((prev) => prev.filter((e) => e.id !== expense.id));
   }, []);
 
   const signOffExpense = useCallback(

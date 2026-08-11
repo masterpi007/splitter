@@ -243,21 +243,11 @@ export async function updateExpense(
   });
 }
 
+// Permanently delete an expense (creator/admin only, enforced server-side).
 export async function deleteExpense(id: string): Promise<void> {
-  await fetchApi<void>(`/expenses/${id}`, {
+  await fetchApi<void>(`/expenses/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
-}
-
-// Soft delete - mark expense with 'deleted' tag instead of actually deleting
-export async function softDeleteExpense(expense: Expense): Promise<Expense> {
-  const tags = expense.tags || [];
-  if (!tags.includes('deleted')) {
-    return updateExpense(expense.id, {
-      tags: [...tags, 'deleted'],
-    });
-  }
-  return expense;
 }
 
 // --- Receipt processing ---

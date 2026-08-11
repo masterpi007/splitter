@@ -5,7 +5,7 @@ import { calculateBillGoc, calculateDiscountAmount, formatCurrency, formatRelati
 import { SignOffButton } from './SignOffButton';
 import { useApp } from '../context/AppContext';
 import { ConfirmDialog } from './ConfirmDialog';
-import { YouBadge } from './YouBadge';
+
 
 interface ExpenseCardProps {
   expense: Expense;
@@ -93,17 +93,10 @@ export function ExpenseCard({
   const recipient = isSettlement ? members.find((m) => m.id === expense.splits[0]?.memberId) : null;
 
   const getMemberName = (id: string) => {
-    const member = members.find((m) => m.id === id);
-    const name = member?.name || 'Unknown';
     if (currentUser && id === currentUser.id) {
-      return (
-        <>
-          {name}
-          <YouBadge />
-        </>
-      );
+      return <span className="text-amber-400 font-medium">You</span>;
     }
-    return name;
+    return members.find((m) => m.id === id)?.name || 'Unknown';
   };
 
   const userSplit = currentUser
@@ -137,8 +130,10 @@ export function ExpenseCard({
       className={`bg-gray-800 rounded-lg shadow-sm border p-4 cursor-pointer transition-all duration-150 ${
         expenseDeleted
           ? 'border-gray-700 hover:shadow-[0_0_0_1px_rgba(55,65,81,0.45),0_10px_30px_rgba(55,65,81,0.12)]'
+          : isSettlement
+          ? 'border-cyan-600 hover:shadow-[0_0_0_1px_rgba(8,145,178,0.5),0_10px_30px_rgba(8,145,178,0.18)]'
           : allSigned
-          ? 'border-green-700 hover:shadow-[0_0_0_1px_rgba(21,128,61,0.5),0_10px_30px_rgba(21,128,61,0.18)]'
+          ? 'border-white/60 hover:shadow-[0_0_0_1px_rgba(255,255,255,0.4),0_10px_30px_rgba(255,255,255,0.10)]'
           : 'border-yellow-700 hover:shadow-[0_0_0_1px_rgba(161,98,7,0.45),0_10px_30px_rgba(161,98,7,0.14)]'
       } hover:-translate-y-0.5 ${expenseDeleted ? 'opacity-60' : ''}`}
     >
@@ -747,7 +742,7 @@ export function ExpenseCard({
       <ConfirmDialog
         open={showDeleteConfirm}
         title="Delete transaction"
-        message={`Are you sure you want to delete "${expense.description}"? This cannot be undone.`}
+        message={`Permanently delete "${expense.description}"? This cannot be undone.`}
         confirmLabel="Delete"
         cancelLabel="Cancel"
         destructive

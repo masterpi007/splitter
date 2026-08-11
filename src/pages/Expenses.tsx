@@ -9,7 +9,7 @@ export function Expenses() {
   const { group, expenses, currentUser } = useApp();
   const [searchParams] = useSearchParams();
   const expandId = searchParams.get('expand');
-  const [filter, setFilter] = useState<'all' | 'mine' | 'deleted'>('all');
+  const [filter, setFilter] = useState<'all' | 'mine'>('all');
   const [sortBy, setSortBy] = useState<'payment' | 'created'>('payment');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
@@ -37,20 +37,17 @@ export function Expenses() {
   // Apply filters
   let filteredExpenses = expenses;
 
-  // Filter by mine/all/deleted
+  // Filter by mine/all. Deletion is permanent now, but legacy soft-deleted
+  // records (pre-hard-delete tag markers) may still exist in storage — keep
+  // hiding them everywhere.
   if (filter === 'mine') {
-    // "Mine" view: show user's expenses (exclude deleted)
     filteredExpenses = filteredExpenses.filter(
       (e) =>
         !isDeleted(e) &&
         (e.paidBy === currentUser?.id ||
           e.splits.some((s) => s.memberId === currentUser?.id))
     );
-  } else if (filter === 'deleted') {
-    // "Deleted" view: show all deleted expenses from everyone
-    filteredExpenses = filteredExpenses.filter((e) => isDeleted(e));
   } else {
-    // "All" view: hide deleted expenses
     filteredExpenses = filteredExpenses.filter((e) => !isDeleted(e));
   }
 
@@ -214,16 +211,6 @@ const getMemberName = (id: string, members: Member[]) =>
               }`}
             >
               Yours
-            </button>
-            <button
-              onClick={() => setFilter('deleted')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${
-                filter === 'deleted'
-                  ? 'bg-red-600 text-white'
-                  : 'bg-gray-700 text-gray-300'
-              }`}
-            >
-              Trash
             </button>
           </div>
           <button

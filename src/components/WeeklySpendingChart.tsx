@@ -40,6 +40,8 @@ export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser
   const [period, setPeriod] = useState<Period>('week');
   const [selected, setSelected] = useState<number>(-1);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const tagMenuRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -54,6 +56,17 @@ export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser
     }
     return [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
   }, [expenses]);
+
+  useEffect(() => {
+    if (!tagMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (tagMenuRef.current && !tagMenuRef.current.contains(e.target as Node)) {
+        setTagMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [tagMenuOpen]);
 
   const toggleTag = (tag: string) => {
     setSelectedTags((prev) => {
@@ -178,32 +191,48 @@ export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser
       </div>
 
       {availableTags.length > 0 && (
-        <div className="flex gap-1.5 overflow-x-auto pb-1 mb-2 -mx-1 px-1">
-          {availableTags.map((tag) => {
-            const active = selectedTags.has(tag);
-            return (
-              <button
-                key={tag}
-                type="button"
-                onClick={() => toggleTag(tag)}
-                className={`shrink-0 text-xs px-2 py-0.5 rounded-full border transition-colors ${
-                  active
-                    ? 'bg-cyan-600 border-cyan-500 text-white'
-                    : 'bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-500'
-                }`}
-              >
-                {tag}
-              </button>
-            );
-          })}
-          {selectedTags.size > 0 && (
-            <button
-              type="button"
-              onClick={() => setSelectedTags(new Set())}
-              className="shrink-0 text-xs px-2 py-0.5 rounded-full text-gray-500 hover:text-gray-300"
-            >
-              × clear
-            </button>
+        <div ref={tagMenuRef} className="relative mb-2">
+          <button
+            type="button"
+            onClick={() => setTagMenuOpen((v) => !v)}
+            className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+              selectedTags.size > 0
+                ? 'border-cyan-500 text-cyan-300 bg-cyan-600/10'
+                : 'border-gray-700 text-gray-400 bg-gray-900 hover:border-gray-500'
+            }`}
+          >
+            {selectedTags.size === 0
+              ? 'Filter by tags ▾'
+              : `Tags: ${[...selectedTags].slice(0, 2).join(', ')}${
+                  selectedTags.size > 2 ? ` +${selectedTags.size - 2}` : ''
+                } ▾`}
+          </button>
+          {tagMenuOpen && (
+            <div className="absolute z-10 mt-1 w-56 max-h-56 overflow-y-auto bg-gray-800 border border-gray-600 rounded-lg shadow-xl">
+              {selectedTags.size > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTags(new Set())}
+                    className="w-full px-3 py-1.5 text-sm text-left text-gray-400 hover:bg-gray-700"
+                  >
+                    Clear filter
+                  </button>
+                  <div className="border-t border-gray-700" />
+                </>
+              )}
+              {availableTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => toggleTag(tag)}
+                  className="w-full flex items-center justify-between px-3 py-1.5 text-sm text-left hover:bg-gray-700"
+                >
+                  <span className={selectedTags.has(tag) ? 'text-cyan-300' : 'text-gray-300'}>{tag}</span>
+                  {selectedTags.has(tag) && <span className="text-cyan-400">✓</span>}
+                </button>
+              ))}
+            </div>
           )}
         </div>
       )}

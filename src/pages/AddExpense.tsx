@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { ReceiptCapture } from '../components/ReceiptCapture';
 import { ReceiptItems } from '../components/ReceiptItems';
@@ -30,10 +30,11 @@ export function AddExpense() {
   const [tagInput, setTagInput] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const [splitMode, setSplitMode] = useState<'items' | 'shares' | 'group'>('shares');
+  const [splitMode, setSplitMode] = useState<'items' | 'shares' | 'group' | 'settlement'>('shares');
+  const [settleTo, setSettleTo] = useState('');
   const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(new Set());
   const [memberShares, setMemberShares] = useState<Record<string, number>>({});
-  const [pendingModeSwitch, setPendingModeSwitch] = useState<'items' | 'shares' | 'group' | null>(null);
+  const [pendingModeSwitch, setPendingModeSwitch] = useState<'items' | 'shares' | 'group' | 'settlement' | null>(null);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -165,8 +166,16 @@ export function AddExpense() {
     }
   };
 
-  const executeModeSwitch = (mode: 'items' | 'shares' | 'group') => {
-    if (mode === 'shares') {
+  const executeModeSwitch = (mode: 'items' | 'shares' | 'group' | 'settlement') => {
+    if (mode === 'settlement') {
+      // Settlement: a direct transfer — no items, shares, or discounts.
+      setItems([]);
+      setDiscount(undefined);
+      setDiscountType('percentage');
+      setHasManualTotal(false);
+      setShowDiscountInput(false);
+      setMemberShares({});
+    } else if (mode === 'shares') {
       setItems([]);
       setDiscount(undefined);
       setDiscountType('percentage');
@@ -204,11 +213,11 @@ export function AddExpense() {
     setPendingModeSwitch(null);
   };
 
-  const handleSplitModeChange = (mode: 'items' | 'shares' | 'group') => {
+  const handleSplitModeChange = (mode: 'items' | 'shares' | 'group' | 'settlement') => {
     if (mode === splitMode) return;
     const needsConfirm =
       mode === 'shares' ? hasItems :
-      mode === 'group' ? (hasItems || Object.keys(memberShares).length > 0) :
+      mode === 'group' || mode === 'settlement' ? (hasItems || Object.keys(memberShares).length > 0) :
       Object.keys(memberShares).length > 0;
     if (needsConfirm) {
       setPendingModeSwitch(mode);
@@ -356,11 +365,15 @@ export function AddExpense() {
     e.preventDefault();
     setError(null);
 
-    if (!description.trim()) { setError('Description is required'); return; }
+    if (!description.trim() && splitMode !== 'settlement') { setError('Description is required'); return; }
     if (!paidBy) { setError('Select who paid'); return; }
     if (!currentUser) { setError('Select your name first'); return; }
 
-    if (splitMode === 'items') {
+    if (splitMode === 'settlement') {
+      if (totalAmount <= 0) { setError('Amount must be greater than 0'); return; }
+      if (!settleTo) { setError('Select who receives the money'); return; }
+      if (settleTo === paidBy) { setError('Sender and recipient must be different'); return; }
+    } else if (splitMode === 'items') {
       if (totalAmount <= 0) { setError('Total amount must be greater than 0'); return; }
       if (items.length === 0) { setError('Add at least one item'); return; }
       if (discountType === 'flat' && discount) {
@@ -381,7 +394,25 @@ export function AddExpense() {
     setSubmitting(true);
 
     try {
-      if (splitMode === 'items') {
+      if (splitMode === 'settlement') {
+        // Mirrors AddSettlement: single-split transfer the recipient confirms.
+        const fromName = group.members.find((m) => m.id === paidBy)?.name ?? 'Unknown';
+        const toName = group.members.find((m) => m.id === settleTo)?.name ?? 'Unknown';
+        const autoSign = settleTo === currentUser.id;
+        await createExpense({
+          description: description.trim() || `Settlement: ${fromName} → ${toName}`,
+          amount: totalAmount, paidBy,
+          createdBy: currentUser.id, splitType: 'settlement',
+          splits: [{
+            memberId: settleTo,
+            value: totalAmount,
+            amount: totalAmount,
+            signedOff: autoSign,
+            signedAt: autoSign ? new Date().toISOString() : undefined,
+          }],
+          receiptDate,
+        });
+      } else if (splitMode === 'items') {
         const splitBillGoc = items.reduce((sum, i) => sum + i.amount, 0);
         const splitDiscountAmount = discountType === 'flat'
           ? (discount ?? 0)
@@ -473,12 +504,7 @@ export function AddExpense() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold">Add Transaction</h2>
-        <Link to="/settle" className="text-sm text-cyan-400 hover:text-cyan-300">
-          Record settlement →
-        </Link>
-      </div>
+      <h2 className="text-xl font-bold mb-6">Add Transaction</h2>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {splitMode === 'items' && (
@@ -633,7 +659,7 @@ export function AddExpense() {
 
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-1">
-            Paid by
+            {splitMode === 'settlement' ? 'From (sender)' : 'Paid by'}
           </label>
           <select
             value={paidBy}
@@ -649,7 +675,7 @@ export function AddExpense() {
           </select>
         </div>
 
-        {splitMode !== 'group' && (
+        {splitMode !== 'group' && splitMode !== 'settlement' && (
           <div>
             <div className="flex justify-between items-center mb-2">
               <label className="block text-sm font-medium text-gray-300">
@@ -816,10 +842,45 @@ export function AddExpense() {
           >
             Group
           </button>
+          <button
+            type="button"
+            onClick={() => handleSplitModeChange('settlement')}
+            className={`flex-1 text-center py-1.5 text-sm rounded-md transition-colors ${
+              splitMode === 'settlement'
+                ? 'bg-green-600 text-white font-semibold'
+                : 'text-gray-500'
+            }`}
+          >
+            Settle
+          </button>
         </div>
 
         {/* Split details */}
-        {splitMode === 'group' ? (
+        {splitMode === 'settlement' ? (
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              To (recipient)
+            </label>
+            <select
+              value={settleTo}
+              onChange={(e) => setSettleTo(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-100"
+            >
+              <option value="">Select who receives the money</option>
+              {group.members
+                .filter((member) => member.id !== paidBy)
+                .map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                  </option>
+                ))}
+            </select>
+            <p className="mt-1.5 text-xs text-gray-500">
+              Records a money transfer between members — doesn't count as
+              spending. The recipient confirms receipt. Description is optional.
+            </p>
+          </div>
+        ) : splitMode === 'group' ? (
           <div className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-sm text-gray-300">
             <p className="font-medium text-gray-100 mb-1">
               Split across the whole group ({group.members.length} member{group.members.length === 1 ? '' : 's'})
@@ -928,11 +989,13 @@ export function AddExpense() {
               ? items.length === 0
               : splitMode === 'group'
                 ? totalAmount <= 0 || group.members.length === 0
-                : Object.keys(memberShares).length === 0 || totalAmount <= 0)
+                : splitMode === 'settlement'
+                  ? totalAmount <= 0 || !settleTo || settleTo === paidBy
+                  : Object.keys(memberShares).length === 0 || totalAmount <= 0)
           }
           className="w-full bg-cyan-600 text-white py-3 rounded-lg font-medium hover:bg-cyan-700 disabled:opacity-50"
         >
-          {submitting ? 'Adding...' : 'Add Transaction'}
+          {submitting ? 'Adding...' : splitMode === 'settlement' ? 'Record Settlement' : 'Add Transaction'}
         </button>
       </form>
 

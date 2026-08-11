@@ -188,8 +188,10 @@ export function ExpenseView() {
         <div>
           <p className="text-3xl font-bold text-gray-100">{formatCurrency(expense.amount, currency)}</p>
           <p className="text-sm text-gray-400 mt-1">
-            Paid by <span className="text-gray-200">{getMemberName(expense.paidBy)}</span>
-            {currentUser && expense.paidBy === currentUser.id && <> <YouBadge /></>}
+            Paid by{' '}
+            <span className={isPayer ? 'text-amber-400 font-medium' : 'text-gray-200'}>
+              {isPayer ? 'You' : getMemberName(expense.paidBy)}
+            </span>
             <span className="mx-2">·</span>
             {formatRelativeTime(expense.receiptDate ?? expense.createdAt)}
           </p>
@@ -295,7 +297,7 @@ export function ExpenseView() {
       <ConfirmDialog
         open={showDeleteConfirm}
         title="Delete transaction"
-        message={`Are you sure you want to delete "${expense.description}"? This cannot be undone.`}
+        message={`Permanently delete "${expense.description}"? This cannot be undone.`}
         confirmLabel="Delete"
         cancelLabel="Cancel"
         destructive

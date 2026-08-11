@@ -256,9 +256,16 @@ export const onRequestDelete: PagesFunction<AuthEnv> = async (context) => {
       }
 
       const deletedExpense = expenses[index];
-      if (!canEditExpenseStructurally(group, deletedExpense, member)) {
+      // Group admins may delete any expense; the creator or the payer may
+      // delete their own.
+      const creatorId = deletedExpense.createdBy ?? deletedExpense.paidBy;
+      const mayDelete =
+        isAdmin(group, member.id) ||
+        creatorId === member.id ||
+        deletedExpense.paidBy === member.id;
+      if (!mayDelete) {
         return Response.json(
-          { success: false, error: 'Only the creator or a group admin can delete this expense' },
+          { success: false, error: 'Only the creator, the payer, or a group admin can delete this expense' },
           { status: 403 },
         );
       }
