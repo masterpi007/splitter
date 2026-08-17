@@ -532,15 +532,36 @@ const TAG_COLORS = [
   { bg: 'bg-rose-900', text: 'text-rose-300', hoverBg: 'hover:bg-rose-800' },
 ];
 
-export function getTagColor(tag: string): { bg: string; text: string; hoverBg: string } {
+// SVG needs real colours, not Tailwind classes. Same order as TAG_COLORS so a
+// tag's chart line matches its chip; 400-level shades read well on the dark
+// background.
+const TAG_STROKES = [
+  '#c084fc', // purple
+  '#60a5fa', // blue
+  '#4ade80', // green
+  '#f472b6', // pink
+  '#818cf8', // indigo
+  '#2dd4bf', // teal
+  '#fbbf24', // amber
+  '#fb7185', // rose
+];
+
+function tagIndex(tag: string): number {
   // Simple hash based on tag characters
   let hash = 0;
   for (let i = 0; i < tag.length; i++) {
     hash = ((hash << 5) - hash) + tag.charCodeAt(i);
     hash = hash & hash; // Convert to 32bit integer
   }
-  const index = Math.abs(hash) % TAG_COLORS.length;
-  return TAG_COLORS[index];
+  return Math.abs(hash) % TAG_COLORS.length;
+}
+
+export function getTagColor(tag: string): { bg: string; text: string; hoverBg: string } {
+  return TAG_COLORS[tagIndex(tag)];
+}
+
+export function getTagStroke(tag: string): string {
+  return TAG_STROKES[tagIndex(tag)];
 }
 
 /** Convert an ISO string to a datetime-local input value */

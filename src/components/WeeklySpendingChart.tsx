@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Expense } from '../types';
-import { formatCurrency, formatNumber, calculateWeeklySpending, calculateDailySpending, calculateMonthlySpending } from '../utils/balances';
+import { formatCurrency, formatNumber, calculateWeeklySpending, calculateDailySpending, calculateMonthlySpending, getTagStroke } from '../utils/balances';
 
 interface Props {
   expenses: Expense[];
@@ -128,8 +128,41 @@ export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser
   }
 
   const effectiveMode: ViewMode = hasUser ? viewMode : 'group';
-  const values = data.map((d) => (effectiveMode === 'group' ? d.groupTotal : d.userShare));
-  const maxValue = Math.max(...values, 1);
+  const pick = (d: { groupTotal: number; userShare: number }) =>
+    effectiveMode === 'group' ? d.groupTotal : d.userShare;
+
+  // No tags selected: one cyan total line with the area fill. With tags
+  // selected the total is replaced by one line per tag, coloured to match its
+  // chip, so the tags can be compared against each other rather than summed.
+  const series: { key: string; label: string; color: string; values: number[] }[] =
+    selectedTags.size === 0
+      ? [{ key: '__total', label: 'Total', color: '#06b6d4', values: data.map(pick) }]
+      : [...selectedTags].map((tag) => {
+          const calc =
+            period === 'day'
+              ? calculateDailySpending
+              : period === 'month'
+                ? calculateMonthlySpending
+                : calculateWeeklySpending;
+          const forTag = calc(
+            expenses.filter((e) => e.tags?.includes(tag)),
+            currentUserId,
+          );
+          // Align onto the shared bucket list; a tag with no spending in a
+          // bucket contributes a zero rather than shifting the line.
+          const byKey = new Map(forTag.map((d) => [d.weekStart, d]));
+          return {
+            key: tag,
+            label: tag,
+            color: getTagStroke(tag),
+            values: data.map((d) => {
+              const hit = byKey.get(d.weekStart);
+              return hit ? pick(hit) : 0;
+            }),
+          };
+        });
+
+  const maxValue = Math.max(...series.flatMap((s) => s.values), 1);
 
   const barWidth = PERIOD_WIDTH[period];
   const innerHeight = CHART_HEIGHT - PAD_TOP - PAD_BOTTOM;
@@ -140,16 +173,21 @@ export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser
   const innerWidth = shouldStretch ? usableContainerWidth : naturalInnerWidth;
   const width = innerWidth + PAD_X * 2;
 
-  const points = values.map((v, i) => ({
-    x: PAD_X + i * effectiveBarWidth + effectiveBarWidth / 2,
-    y: PAD_TOP + innerHeight * (1 - v / maxValue),
-    value: v,
-  }));
+  const xAt = (i: number) => PAD_X + i * effectiveBarWidth + effectiveBarWidth / 2;
+  const yAt = (v: number) => PAD_TOP + innerHeight * (1 - v / maxValue);
 
-  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
+  const plotted = series.map((s) => ({
+    ...s,
+    points: s.values.map((v, i) => ({ x: xAt(i), y: yAt(v), value: v })),
+  }));
+  const pathOf = (pts: { x: number; y: number }[]) =>
+    pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
+
+  const isTotalMode = selectedTags.size === 0;
+  const totalPoints = plotted[0]?.points ?? [];
   const areaPath =
-    points.length > 0
-      ? `${linePath} L${points[points.length - 1].x},${PAD_TOP + innerHeight} L${points[0].x},${PAD_TOP + innerHeight} Z`
+    isTotalMode && totalPoints.length > 0
+      ? `${pathOf(totalPoints)} L${totalPoints[totalPoints.length - 1].x},${PAD_TOP + innerHeight} L${totalPoints[0].x},${PAD_TOP + innerHeight} Z`
       : '';
 
   const selIdx = selected >= 0 && selected < data.length ? selected : data.length - 1;
@@ -257,38 +295,47 @@ export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser
             </linearGradient>
           </defs>
           {areaPath && <path d={areaPath} fill="url(#spending-area)" />}
-          <path d={linePath} stroke="#06b6d4" strokeWidth={2} fill="none" />
-          {points.map((p, i) => (
-            <g key={i} onClick={() => setSelected(i)} style={{ cursor: 'pointer' }}>
-              <rect x={p.x - effectiveBarWidth / 2} y={0} width={effectiveBarWidth} height={CHART_HEIGHT} fill="transparent" />
+          {plotted.map((s) => (
+            <path key={s.key} d={pathOf(s.points)} stroke={s.color} strokeWidth={2} fill="none" />
+          ))}
+          {plotted.map((s) =>
+            s.points.map((p, i) => (
               <circle
+                key={`${s.key}-${i}`}
                 cx={p.x}
                 cy={p.y}
-                r={selIdx === i ? 5 : 3}
-                fill={selIdx === i ? '#22d3ee' : '#0891b2'}
+                r={selIdx === i ? 4.5 : 2.5}
+                fill={s.color}
                 stroke={selIdx === i ? '#fff' : 'none'}
                 strokeWidth={selIdx === i ? 1.5 : 0}
               />
-              {p.value > 0 && (
+            )),
+          )}
+          {/* Hit areas and axis labels, drawn once regardless of series count */}
+          {data.map((d, i) => (
+            <g key={d.weekStart} onClick={() => setSelected(i)} style={{ cursor: 'pointer' }}>
+              <rect x={xAt(i) - effectiveBarWidth / 2} y={0} width={effectiveBarWidth} height={CHART_HEIGHT} fill="transparent" />
+              {/* Value labels only make sense with a single line */}
+              {isTotalMode && totalPoints[i]?.value > 0 && (
                 <text
-                  x={p.x}
-                  y={p.y - 9}
+                  x={xAt(i)}
+                  y={totalPoints[i].y - 9}
                   textAnchor="middle"
                   fontSize={10}
                   fill={selIdx === i ? '#22d3ee' : '#9ca3af'}
                   fontWeight={selIdx === i ? 600 : 400}
                 >
-                  {formatNumber(p.value)}
+                  {formatNumber(totalPoints[i].value)}
                 </text>
               )}
               <text
-                x={p.x}
+                x={xAt(i)}
                 y={CHART_HEIGHT - 8}
                 textAnchor="middle"
                 fontSize={10}
                 fill={selIdx === i ? '#e5e7eb' : '#9ca3af'}
               >
-                {formatLabel(data[i].weekStart, period)}
+                {formatLabel(d.weekStart, period)}
               </text>
             </g>
           ))}
@@ -300,8 +347,25 @@ export function WeeklySpendingChart({ expenses, currentUserId, currency, hasUser
       {selectedBucket && (
         <div className="mt-2 text-sm text-gray-300">
           <span className="font-medium">{formatPeriodLabel(selectedBucket.weekStart, period)}</span>
-          <span className="text-gray-500"> · </span>
-          <span className="font-semibold text-cyan-300">{formatCurrency(selectedValue, currency)}</span>
+          {isTotalMode ? (
+            <>
+              <span className="text-gray-500"> · </span>
+              <span className="font-semibold text-cyan-300">{formatCurrency(selectedValue, currency)}</span>
+            </>
+          ) : (
+            // Doubles as the legend: colour, tag, and its value in this bucket.
+            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+              {plotted.map((s) => (
+                <span key={s.key} className="flex items-center gap-1.5 text-xs">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                  <span className="text-gray-400">{s.label}</span>
+                  <span className="font-semibold" style={{ color: s.color }}>
+                    {formatCurrency(s.values[selIdx] ?? 0, currency)}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
