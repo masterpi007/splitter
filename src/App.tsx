@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import { AuthProvider } from './components/auth';
 import { Layout } from './components/Layout';
+import { LazyRouteBoundary } from './components/LazyRouteBoundary';
 import { Dashboard } from './pages/Dashboard';
 
 // The dashboard is what almost every visit opens, so it stays in the entry
@@ -36,7 +37,8 @@ function App() {
       <AuthProvider>
         <AppProvider>
           <Layout>
-            <Suspense fallback={<RouteFallback />}>
+            <LazyRouteBoundary>
+              <Suspense fallback={<RouteFallback />}>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/expenses" element={<Expenses />} />
@@ -52,7 +54,8 @@ function App() {
                 <Route path="/groups/:id/manage" element={<GroupManager />} />
                 <Route path="/invite/:code" element={<AcceptInvite />} />
               </Routes>
-            </Suspense>
+              </Suspense>
+            </LazyRouteBoundary>
           </Layout>
         </AppProvider>
       </AuthProvider>
