@@ -52,7 +52,12 @@ export function NotificationBell() {
   const ref = useRef<HTMLDivElement>(null);
 
   // Telegram state
-  const [telegram, setTelegram] = useState<TelegramStatus>({ connected: false, notifyPrefs: null });
+  // The Telegram link lives on the ACCOUNT (server-side), unlike push
+  // subscriptions which are per-device. Until the status fetch answers we
+  // don't know either way, so the button shows a checking state instead of
+  // wrongly offering "Connect" to an already-linked account.
+  const [tgStatusKnown, setTgStatusKnown] = useState(false);
+  const [telegram, setTelegram] = useState<TelegramStatus>({ connected: false,notifyPrefs: null });
   const [tgConnecting, setTgConnecting] = useState(false);
   const [tgFailed, setTgFailed] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -82,6 +87,7 @@ export function NotificationBell() {
   useEffect(() => {
     if (!open || !authenticated) return;
     getTelegramStatus().then((s) => {
+      setTgStatusKnown(true);
       if (s.connected) {
         setTelegram(s);
         setTgConnecting(false);
@@ -343,7 +349,7 @@ export function NotificationBell() {
                   {/* Telegram */}
                   <button
                     onClick={telegram.connected ? handleTgDisconnect : handleTgConnect}
-                    disabled={tgConnecting}
+                    disabled={tgConnecting || (!tgStatusKnown && !telegram.connected)}
                     className={`group flex items-center gap-2 w-full px-2.5 py-2 rounded text-xs font-medium ${
                       telegram.connected
                         ? 'cursor-pointer text-cyan-400 bg-cyan-900/30 hover:bg-red-900/20 hover:text-red-400'
@@ -360,7 +366,7 @@ export function NotificationBell() {
                         <span className="group-hover:hidden">{`@${telegram.telegramName}`}</span>
                         <span className="hidden group-hover:inline">Disconnect</span>
                       </>
-                    ) : tgConnecting ? 'Connecting...' : tgFailed ? 'Connection failed — Retry' : 'Connect Telegram'}
+                    ) : tgConnecting ? 'Connecting...' : tgFailed ? 'Connection failed — Retry' : !tgStatusKnown ? 'Checking Telegram…' : 'Connect Telegram'}
                   </button>
                 </div>
 
