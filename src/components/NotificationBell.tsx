@@ -67,20 +67,37 @@ export function NotificationBell() {
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
+  const fetchInFlight = useRef(false);
   const fetchNotifications = useCallback(async () => {
     if (!authenticated) return;
+    // A slow backend makes 30s polls overlap and pile up; one at a time.
+    if (fetchInFlight.current) return;
+    fetchInFlight.current = true;
     try {
       const data = await api.getNotifications();
       setNotifications(data);
     } catch {
       // ignore
+    } finally {
+      fetchInFlight.current = false;
     }
   }, [authenticated]);
 
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000);
-    return () => clearInterval(interval);
+    // Poll only while the tab is visible — push + the SW's REFRESH_DATA
+    // message already cover background delivery. Catch up on re-focus.
+    const interval = setInterval(() => {
+      if (!document.hidden) fetchNotifications();
+    }, 60000);
+    const onVisible = () => {
+      if (!document.hidden) fetchNotifications();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [fetchNotifications]);
 
   // Re-fetch telegram status and push prefs whenever bell opens
