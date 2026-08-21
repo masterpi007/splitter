@@ -298,11 +298,13 @@ export function calculateSettlements(balances: MemberBalance[]): Settlement[] {
 }
 
 export function formatCurrency(amount: number, currency: string): string {
-  // Round to 1 decimal place
-  const rounded = Math.round(amount * 10) / 10;
+  // Amounts are stored with 2-decimal precision (distributeByShares/roundNumber),
+  // so display the full stored value — rounding to 1 decimal here made list
+  // cards disagree with the edit page.
+  const rounded = Math.round(amount * 100) / 100;
 
   if (currency === 'K') {
-    return `${rounded.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 1 })}K`;
+    return `${rounded.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}K`;
   }
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
