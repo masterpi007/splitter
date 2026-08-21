@@ -104,7 +104,10 @@ export function EditExpense() {
   const canOnlyEditOwnItems = !isAdmin && isParticipant && !isPayer && !isCreator;
   // Admin (acting in admin capacity, i.e. not also the payer) edits
   // void the existing sign-off ledger so the payer + participants must
-  // re-accept the new amounts.
+  // re-accept the new amounts — but only when the edit changes what was
+  // agreed to (amount, payer, split type). Date/description/tag edits
+  // keep everyone's acceptance; per-row amount changes still reset that
+  // row via buildSplit.
   const adminWipeAcceptance = isAdmin && !isPayer;
 
   const billGoc = useMemo(() => {
@@ -420,6 +423,15 @@ export function EditExpense() {
 
     try {
       const now = new Date().toISOString();
+      // What members agreed to is the money and its attribution. Only when
+      // one of those moves does an admin edit void the sign-off ledger;
+      // otherwise (date, description, tags, receipt) acceptances survive.
+      const newSplitType = splitMode === 'items' ? 'exact' : splitMode;
+      const materialChange =
+        Math.abs(expense.amount - totalAmount) > 0.01 ||
+        expense.paidBy !== paidBy ||
+        expense.splitType !== newSplitType;
+      const wipeAcceptance = adminWipeAcceptance && materialChange;
       if (splitMode === 'settlement') {
         const oldSplit = expense.splits[0];
         // Recipient keeps their confirmation only when nothing that matters
@@ -460,7 +472,7 @@ export function EditExpense() {
           splitType: 'group',
           splits: [],
           receiptDate: receiptDate || undefined,
-          ...(adminWipeAcceptance
+          ...(wipeAcceptance
             ? { signedOffBy: currentUser ? [{ memberId: currentUser.id, signedAt: now }] : [] }
             : {}),
         });
@@ -468,9 +480,10 @@ export function EditExpense() {
         return;
       }
       // Build a single split row honoring the editor's role:
-      //   - admin (not payer): force re-acceptance from the payer + every
-      //     participant; admin auto-signs only their own row.
-      //   - payer/creator: payer auto-signs, others reset only when their
+      //   - admin (not payer) making a material change: force re-acceptance
+      //     from the payer + every participant; admin auto-signs only their
+      //     own row.
+      //   - otherwise: payer auto-signs, others reset only when their
       //     amount changed.
       const buildSplit = (
         memberId: string,
@@ -478,7 +491,7 @@ export function EditExpense() {
         amount: number,
         oldSplit: { amount: number; signedOff: boolean; signedAt?: string; previousAmount?: number } | undefined,
       ) => {
-        if (adminWipeAcceptance) {
+        if (wipeAcceptance) {
           const isSelf = memberId === currentUser?.id;
           const amountChanged = !!oldSplit && Math.abs(oldSplit.amount - amount) > 0.01;
           return {
@@ -583,7 +596,7 @@ export function EditExpense() {
         </div>
       ) : adminWipeAcceptance ? (
         <div className="bg-yellow-900/30 border border-yellow-700 text-yellow-200 px-4 py-3 rounded-lg mb-6 text-sm">
-          Saving will reset acceptance — the payer and every participant will need to accept the new amounts.
+          Changing the amount, payer or split will reset acceptance — the payer and every participant will need to accept again. Date and description edits keep acceptances.
         </div>
       ) : (
         <div className="bg-yellow-900/30 border border-yellow-700 text-yellow-200 px-4 py-3 rounded-lg mb-6 text-sm">

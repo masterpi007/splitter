@@ -180,6 +180,7 @@ async function sendEditNotification(
   expense: Expense,
   editorMemberId: string | null,
   action: 'updated' | 'removed',
+  requiresReAccept = false,
 ): Promise<void> {
   const involved = new Set<string>();
   if (expense.splitType === 'group') {
@@ -220,18 +221,24 @@ async function sendEditNotification(
         .map((s) => `  • ${getMemberName(group, s.memberId)}: ${formatAmount(s.amount, currency)}`)
         .join('\n');
       const userIds = memberIdsToUserIds(group, expense.splits.map((s) => s.memberId));
-      const cbSignoff = await createCallbackData(env, 'signoff', group.id, expense.id);
+      // Only ask people to re-confirm when the edit actually voided their
+      // acceptance — a date or description tweak keeps sign-offs intact.
+      const cbSignoff = requiresReAccept
+        ? await createCallbackData(env, 'signoff', group.id, expense.id)
+        : null;
       await sendDebouncedEditNotification(
         expense.id,
         userIds,
         editorUserId,
-        `✏️ <b>Expense updated</b>\n\n📌 ${expense.description}\n👤 Paid by: <b>${payerName}</b>\n✍️ Edited by: <b>${editorName}</b>\n💰 Total: <b>${formatAmount(expense.amount, currency)}</b>\n\n<b>Each member's share:</b>\n${splitsDetail}\n\n⚠️ Please confirm again.`,
+        `✏️ <b>Expense updated</b>\n\n📌 ${expense.description}\n👤 Paid by: <b>${payerName}</b>\n✍️ Edited by: <b>${editorName}</b>\n💰 Total: <b>${formatAmount(expense.amount, currency)}</b>\n\n<b>Each member's share:</b>\n${splitsDetail}${requiresReAccept ? '\n\n⚠️ Please confirm again.' : ''}`,
         env,
-        {
-          inline_keyboard: [
-            [{ text: '✅ Confirm again', callback_data: cbSignoff }],
-          ],
-        },
+        cbSignoff
+          ? {
+              inline_keyboard: [
+                [{ text: '✅ Confirm again', callback_data: cbSignoff }],
+              ],
+            }
+          : undefined,
       );
     } else {
       const userIds = memberIdsToUserIds(group, expense.splits.map((s) => s.memberId));
@@ -360,8 +367,25 @@ export const onRequestPut: PagesFunction<AuthEnv> = async (context) => {
         }
       } else {
         const isDeleted = updatedExpense.tags?.includes('deleted');
+        // Did this edit void anyone's acceptance? Split rows flipping off,
+        // or the group-mode ledger shrinking, mean people must re-confirm.
+        const acceptanceReset =
+          (before.splits ?? []).some((s) => {
+            const a = merged.splits?.find((x) => x.memberId === s.memberId);
+            return s.signedOff && a && !a.signedOff;
+          }) ||
+          (before.signedOffBy ?? []).some(
+            (s) => !(merged.signedOffBy ?? []).some((x) => x.memberId === s.memberId),
+          );
         context.waitUntil(
-          sendEditNotification(context.env, group, updatedExpense, member.id, isDeleted ? 'removed' : 'updated'),
+          sendEditNotification(
+            context.env,
+            group,
+            updatedExpense,
+            member.id,
+            isDeleted ? 'removed' : 'updated',
+            acceptanceReset,
+          ),
         );
       }
 

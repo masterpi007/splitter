@@ -84,17 +84,9 @@ export const onRequestPost: PagesFunction<ReceiptsEnv> = async (context) => {
       );
     } else {
       try {
-        // First, accept the Llama license by sending "agree"
-        try {
-          await context.env.AI.run('@cf/meta/llama-3.2-11b-vision-instruct', {
-            prompt: 'agree',
-            max_tokens: 1,
-          });
-        } catch {
-          // License might already be accepted or this format doesn't work
-        }
-
-        // Use Llama 3.2 Vision model
+        // Use Llama 3.2 Vision model. (The one-time "agree" license prompt
+        // was accepted long ago; running it per scan doubled every request's
+        // inference time.)
         const response = await context.env.AI.run(
           '@cf/meta/llama-3.2-11b-vision-instruct',
           {

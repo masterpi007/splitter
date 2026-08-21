@@ -8,6 +8,38 @@ interface ReceiptCaptureProps {
   disabled?: boolean;
 }
 
+// Phone cameras produce 5-10MB photos. The OCR endpoint converts every byte
+// into a JS number for the AI binding, so oversized uploads burn seconds of
+// server CPU for no accuracy gain — receipt text reads fine at ~1280px.
+const MAX_DIMENSION = 1280;
+
+async function downscaleImage(file: File): Promise<File> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = MAX_DIMENSION / Math.max(bitmap.width, bitmap.height);
+    if (scale >= 1 && file.type === 'image/jpeg') return file;
+
+    const width = Math.round(bitmap.width * Math.min(scale, 1));
+    const height = Math.round(bitmap.height * Math.min(scale, 1));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', 0.8),
+    );
+    if (!blob) return file;
+    return new File([blob], 'receipt.jpg', { type: 'image/jpeg' });
+  } catch {
+    // HEIC or other formats the browser can't decode — send as-is.
+    return file;
+  }
+}
+
 export function ReceiptCapture({ onProcessed, onError, disabled }: ReceiptCaptureProps) {
   const [processing, setProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -17,7 +49,7 @@ export function ReceiptCapture({ onProcessed, onError, disabled }: ReceiptCaptur
     setProcessing(true);
 
     try {
-      const result = await processReceipt(file);
+      const result = await processReceipt(await downscaleImage(file));
       onProcessed(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to process receipt';
