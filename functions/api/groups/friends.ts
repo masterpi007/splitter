@@ -1,7 +1,5 @@
 import type { AuthEnv } from '../types/auth';
 import { requireGroupAdmin } from '../utils/session';
-import { getGroup } from '../utils/groups';
-import { getMemberships } from '../utils/users';
 
 // GET /api/groups/friends — candidates for direct-add.
 //
@@ -23,8 +21,6 @@ export const onRequestGet: PagesFunction<AuthEnv> = async (context) => {
     excluded.add(session.userId);
     for (const m of target.members) if (m.userId) excluded.add(m.userId);
 
-    const memberships = await getMemberships(context.env, session.userId);
-
     interface Candidate {
       userId: string;
       name: string;
@@ -32,26 +28,30 @@ export const onRequestGet: PagesFunction<AuthEnv> = async (context) => {
     }
     const map = new Map<string, Candidate>();
 
-    const otherGroups = await Promise.all(
-      memberships
-        .filter((mem) => mem.groupId !== target.id)
-        .map((mem) => getGroup(context.env, mem.groupId)),
-    );
+    // Every active member of every OTHER group the caller belongs to, in a
+    // single query — the previous parallel getGroup-per-membership opened N
+    // concurrent D1 batches in one invocation and could stall the request.
+    const res = await context.env.DB.prepare(
+      `SELECT g.name AS group_name, m.user_id, m.name
+         FROM members me
+         JOIN groups g ON g.id = me.group_id
+         JOIN members m ON m.group_id = g.id AND m.removed_at IS NULL
+        WHERE me.user_id = ? AND me.removed_at IS NULL AND me.group_id <> ?`,
+    )
+      .bind(session.userId, target.id)
+      .all<{ group_name: string; user_id: string | null; name: string }>();
 
-    for (const g of otherGroups) {
-      if (!g) continue;
-      for (const member of g.members) {
-        if (!member.userId || excluded.has(member.userId)) continue;
-        const existing = map.get(member.userId);
-        if (existing) {
-          existing.groupNames.push(g.name);
-        } else {
-          map.set(member.userId, {
-            userId: member.userId,
-            name: member.name,
-            groupNames: [g.name],
-          });
-        }
+    for (const row of res.results ?? []) {
+      if (!row.user_id || excluded.has(row.user_id)) continue;
+      const existing = map.get(row.user_id);
+      if (existing) {
+        existing.groupNames.push(row.group_name);
+      } else {
+        map.set(row.user_id, {
+          userId: row.user_id,
+          name: row.name,
+          groupNames: [row.group_name],
+        });
       }
     }
 

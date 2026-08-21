@@ -1,36 +1,61 @@
 import type { AuthEnv } from './types/auth';
+import { getTokenFromCookies, verifyToken } from './utils/jwt';
 import { requireSession } from './utils/session';
-import { getMemberships, addMembership } from './utils/users';
-import { createGroup, getGroup, GroupMember, findMember } from './utils/groups';
+import { addMembership } from './utils/users';
+import { createGroup, GroupMember } from './utils/groups';
 
 // GET /api/groups — list the caller's groups (id, name, memberCount).
+//
+// One D1 round trip for the whole endpoint. The previous shape — session
+// lookup, then the membership index, then a parallel getGroup per membership —
+// opened N concurrent batches in a single invocation; under load those
+// connections could stall until the edge cut the request off with a 524.
+// The members table is queried directly by user_id, so it is authoritative:
+// removed members simply don't match, no post-filtering needed.
 export const onRequestGet: PagesFunction<AuthEnv> = async (context) => {
   try {
-    const authed = await requireSession(context.env, context.request);
-    if (authed instanceof Response) return authed;
+    const env = context.env;
+    const token = getTokenFromCookies(context.request);
+    if (!token) {
+      return Response.json({ success: false, error: 'Not authenticated' }, { status: 401 });
+    }
+    const payload = await verifyToken(env, token);
+    if (!payload) {
+      return Response.json({ success: false, error: 'Session expired' }, { status: 401 });
+    }
 
-    const memberships = await getMemberships(context.env, authed.session.userId);
-    const groups = await Promise.all(
-      memberships.map((m) => getGroup(context.env, m.groupId).then((g) => ({ membership: m, group: g }))),
-    );
-    // The group record is authoritative: an entry in the user's membership
-    // index is only valid if the member row still lives in `group.members`
-    // (not in `removedMembers`, not missing). KV has no transactions, so the
-    // index can drift out of sync when an admin removes someone; trust the
-    // group and silently drop stale index entries here.
-    const data = groups
-      .filter((x): x is { membership: typeof x.membership; group: NonNullable<typeof x.group> } => {
-        if (!x.group) return false;
-        const m = findMember(x.group, x.membership.memberId);
-        return !!m && !m.removedAt && m.userId === authed.session.userId;
-      })
-      .map(({ membership, group }) => ({
-        id: group.id,
-        name: group.name,
-        memberId: membership.memberId,
-        memberCount: group.members.length,
-        isAdmin: group.admins.includes(membership.memberId),
-      }));
+    const [sessionRes, groupsRes] = await env.DB.batch([
+      env.DB.prepare(
+        `SELECT id, user_id, expires_at FROM sessions WHERE id = ?`,
+      ).bind(payload.sessionId),
+      env.DB.prepare(
+        `SELECT g.id, g.name, me.id AS member_id, me.is_admin,
+                (SELECT COUNT(*) FROM members m2
+                  WHERE m2.group_id = g.id AND m2.removed_at IS NULL) AS member_count
+           FROM members me
+           JOIN groups g ON g.id = me.group_id
+          WHERE me.user_id = ? AND me.removed_at IS NULL
+          ORDER BY me.joined_at`,
+      ).bind(payload.userId),
+    ]);
+
+    const s = sessionRes.results?.[0] as
+      | { id: string; user_id: string; expires_at: string }
+      | undefined;
+    if (!s || s.user_id !== payload.userId || new Date(s.expires_at) < new Date()) {
+      return Response.json({ success: false, error: 'Session expired' }, { status: 401 });
+    }
+
+    const rows = (groupsRes.results ?? []) as unknown as {
+      id: string; name: string; member_id: string; is_admin: number; member_count: number;
+    }[];
+    const data = rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      memberId: r.member_id,
+      memberCount: r.member_count,
+      isAdmin: r.is_admin === 1,
+    }));
 
     return Response.json({ success: true, data });
   } catch (error) {
