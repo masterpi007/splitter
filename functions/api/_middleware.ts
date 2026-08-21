@@ -17,9 +17,14 @@ export const onRequest: PagesFunction<AuthEnv> = async (context) => {
     );
   }
 
+  // Server-Timing: real time spent inside the function (Date.now only
+  // advances across I/O in Workers, so this effectively measures awaited
+  // D1/fetch time). Lets DevTools separate "backend slow" from "edge slow".
+  const t0 = Date.now();
   const response = await context.next();
   const headers = new Headers(response.headers);
   headers.set('Cache-Control', 'no-store');
+  headers.set('Server-Timing', `fn;dur=${Date.now() - t0}`);
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
