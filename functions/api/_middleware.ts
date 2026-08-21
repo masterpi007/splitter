@@ -20,11 +20,17 @@ export const onRequest: PagesFunction<AuthEnv> = async (context) => {
   // Server-Timing: real time spent inside the function (Date.now only
   // advances across I/O in Workers, so this effectively measures awaited
   // D1/fetch time). Lets DevTools separate "backend slow" from "edge slow".
+  // The start/finish logs pair up in the dashboard's real-time logs: a
+  // "start" with no matching "finish" pinpoints a hung request.
   const t0 = Date.now();
+  const path = new URL(context.request.url).pathname;
+  console.log(`start ${context.request.method} ${path}`);
   const response = await context.next();
+  const ms = Date.now() - t0;
+  console.log(`finish ${context.request.method} ${path} ${response.status} ${ms}ms`);
   const headers = new Headers(response.headers);
   headers.set('Cache-Control', 'no-store');
-  headers.set('Server-Timing', `fn;dur=${Date.now() - t0}`);
+  headers.set('Server-Timing', `fn;dur=${ms}`);
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
