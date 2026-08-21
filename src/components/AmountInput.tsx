@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { evaluateAmountExpression, sanitizeAmountExpression, formatNumber } from '../utils/balances';
+import { evaluateAmountExpression, sanitizeAmountExpression, formatNumber, roundNumber } from '../utils/balances';
 
 interface AmountInputProps {
   /** Committed numeric value; 0/undefined renders as an empty field. */
@@ -48,13 +48,15 @@ export function AmountInput({
       return;
     }
     const n = evaluateAmountExpression(s);
-    if (n !== null && n >= 0) onCommit(n);
+    // Money is stored at 2-decimal precision everywhere; commit the same,
+    // so an expression like 100/3 can't smuggle in endless decimals.
+    if (n !== null && n >= 0) onCommit(roundNumber(n, 2));
   };
 
   const collapse = () => {
     setFocused(false);
     const n = evaluateAmountExpression(text);
-    if (n !== null && n >= 0) setText(n ? String(n) : '');
+    if (n !== null && n >= 0) setText(n ? String(roundNumber(n, 2)) : '');
   };
 
   return (

@@ -49,20 +49,13 @@ export interface GroupSummary {
   memberCount: number;
 }
 
-export async function getGroup(
-  env: AuthEnv,
-  groupId: string,
-): Promise<GroupRecord | null> {
-  const [groupRes, memberRes] = await env.DB.batch([
-    env.DB.prepare(`SELECT * FROM groups WHERE id = ?`).bind(groupId),
-    env.DB.prepare(`SELECT * FROM members WHERE group_id = ? ORDER BY joined_at`).bind(groupId),
-  ]);
-  const g = groupRes.results?.[0] as
-    | { id: string; name: string; currency: string; created_at: string }
-    | undefined;
-  if (!g) return null;
-
-  const rows = memberRes.results as unknown as MemberRow[];
+// Assemble a GroupRecord from already-fetched rows. Exported so callers that
+// batch the group + members queries with other statements (requireGroup)
+// reuse the same mapping instead of paying a second D1 round trip.
+export function buildGroupRecord(
+  g: { id: string; name: string; currency: string; created_at: string },
+  rows: MemberRow[],
+): GroupRecord {
   const members: GroupMember[] = [];
   const removedMembers: GroupMember[] = [];
   const admins: string[] = [];
@@ -83,6 +76,22 @@ export async function getGroup(
     removedMembers,
     createdAt: g.created_at,
   };
+}
+
+export async function getGroup(
+  env: AuthEnv,
+  groupId: string,
+): Promise<GroupRecord | null> {
+  const [groupRes, memberRes] = await env.DB.batch([
+    env.DB.prepare(`SELECT * FROM groups WHERE id = ?`).bind(groupId),
+    env.DB.prepare(`SELECT * FROM members WHERE group_id = ? ORDER BY joined_at`).bind(groupId),
+  ]);
+  const g = groupRes.results?.[0] as
+    | { id: string; name: string; currency: string; created_at: string }
+    | undefined;
+  if (!g) return null;
+
+  return buildGroupRecord(g, memberRes.results as unknown as MemberRow[]);
 }
 
 // Whole-record save, mirroring the KV call sites that read a group, mutate
