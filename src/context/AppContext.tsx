@@ -97,6 +97,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshGroups = useCallback(async () => {
+    setGroupsLoading(true);
     try {
       const list = await api.listGroups();
       setGroups(list);
@@ -111,9 +112,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           localStorage.removeItem('splitter.activeGroupId');
         }
       }
-    } catch {
-      // If listing fails (e.g. not authenticated yet) leave empty silently.
-      setGroups([]);
+    } catch (err) {
+      // Signed out → the list is truly gone. Any other failure (D1 timeout,
+      // flaky network) keeps the last known list on screen instead of
+      // flashing "no groups" while a retry is still possible.
+      if (err instanceof api.ApiError && err.status === 401) {
+        setGroups([]);
+      }
     } finally {
       setGroupsLoading(false);
     }

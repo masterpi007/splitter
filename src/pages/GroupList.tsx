@@ -5,7 +5,7 @@ import { useAuthContext } from '../components/auth';
 
 export function GroupList() {
   const navigate = useNavigate();
-  const { activeGroupId, groups, setActiveGroup, loading } = useApp();
+  const { activeGroupId, groups, setActiveGroup, groupsLoading } = useApp();
   const { authenticated } = useAuthContext();
   const [joinCode, setJoinCode] = useState('');
 
@@ -47,8 +47,10 @@ export function GroupList() {
         </p>
       </div>
 
-      {loading && groups.length === 0 ? (
-        <p className="text-sm text-gray-400">Loading…</p>
+      {groupsLoading && groups.length === 0 ? (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 text-center">
+          <p className="text-sm text-gray-400 animate-pulse">Loading your groups…</p>
+        </div>
       ) : groups.length === 0 ? (
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 text-center">
           <p className="text-sm text-gray-400">You're not in any groups yet.</p>
