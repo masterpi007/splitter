@@ -6,6 +6,7 @@ import type { PasskeyInviteInfo } from '../../api/auth';
 
 interface AuthContextType extends AuthState {
   isSupported: boolean;
+  hasPlatformAuthenticator: boolean | null;
   webAuthnLoading: boolean;
   webAuthnError: string | null;
   register: (
@@ -66,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // WebAuthn state
     isSupported: webAuthn.isSupported,
+    hasPlatformAuthenticator: webAuthn.hasPlatformAuthenticator,
     webAuthnLoading: webAuthn.loading,
     webAuthnError: webAuthn.error,
 

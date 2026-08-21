@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   startRegistration,
   startAuthentication,
   browserSupportsWebAuthn,
+  platformAuthenticatorIsAvailable,
 } from '@simplewebauthn/browser';
 import * as authApi from '../api/auth';
 import type { SessionInfo } from '../types';
@@ -15,6 +16,9 @@ interface WebAuthnState {
 
 interface UseWebAuthnReturn extends WebAuthnState {
   isSupported: boolean;
+  /** null while still detecting. False in embedded browsers (Zalo, Facebook,
+   *  Messenger) that expose the WebAuthn API but have no usable biometric. */
+  hasPlatformAuthenticator: boolean | null;
   register: (
     memberId: string,
     memberName: string,
@@ -33,6 +37,23 @@ export function useWebAuthn(): UseWebAuthnReturn {
   const [error, setError] = useState<string | null>(null);
 
   const isSupported = browserSupportsWebAuthn();
+  // browserSupportsWebAuthn only proves the API exists. In an in-app browser
+  // it can be present while no biometric is reachable, which surfaces later
+  // as a bare "cancelled or timed out" — detect it up front instead.
+  const [hasPlatformAuthenticator, setHasPlatformAuthenticator] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!isSupported) {
+      setHasPlatformAuthenticator(false);
+      return;
+    }
+    let alive = true;
+    platformAuthenticatorIsAvailable()
+      .then((ok) => alive && setHasPlatformAuthenticator(ok))
+      .catch(() => alive && setHasPlatformAuthenticator(false));
+    return () => {
+      alive = false;
+    };
+  }, [isSupported]);
 
   const register = useCallback(async (
     memberId: string,
@@ -168,6 +189,7 @@ export function useWebAuthn(): UseWebAuthnReturn {
     loading,
     error,
     isSupported,
+    hasPlatformAuthenticator,
     register,
     authenticate,
     linkPasskey,
@@ -182,7 +204,10 @@ function getErrorMessage(err: unknown): string {
   if (err instanceof Error) {
     // Handle WebAuthn-specific errors
     if (err.name === 'NotAllowedError') {
-      return 'Authentication was cancelled or timed out. Please try again.';
+      // The spec collapses "user dismissed", "timed out" and "no credential
+      // matched" into one error, so name the likeliest causes rather than
+      // blaming the user for a cancel they did not make.
+      return 'No passkey was used. Either the prompt was dismissed, or this device has no passkey for this site yet — ask an admin for a recovery link, or open the app in Chrome or Safari rather than an in-app browser.';
     }
     if (err.name === 'InvalidStateError') {
       return 'This passkey is already registered.';

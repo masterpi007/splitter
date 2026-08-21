@@ -33,6 +33,12 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
         transports: cred.transports,
       })),
       authenticatorSelection: {
+        // Ask for the phone's own biometrics. Without this the browser
+        // offers the full transport picker (security key / NFC / another
+        // device) and on several Android builds the fingerprint option is
+        // not surfaced at all. Cross-device enrolment still exists — it goes
+        // through the passkey invite link, not this picker.
+        authenticatorAttachment: 'platform',
         residentKey: 'required', // Required for discoverable credentials
         userVerification: 'preferred',
       },

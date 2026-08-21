@@ -59,6 +59,9 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
         transports: cred.transports,
       })),
       authenticatorSelection: {
+        // See register/options.ts — platform attachment keeps the prompt on
+        // the device's own biometrics instead of the transport picker.
+        authenticatorAttachment: 'platform',
         residentKey: 'required',
         userVerification: 'preferred',
       },

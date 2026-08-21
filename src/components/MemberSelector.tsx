@@ -17,6 +17,7 @@ export function MemberSelector() {
     session,
     loading: authLoading,
     isSupported,
+    hasPlatformAuthenticator,
     webAuthnLoading,
     webAuthnError,
     authenticate,
@@ -143,6 +144,18 @@ export function MemberSelector() {
     return (
       <div className="text-sm text-red-400">
         Passkeys not supported
+      </div>
+    );
+  }
+
+  // The API can exist with no usable biometric behind it — typically an
+  // in-app browser (Zalo, Facebook, Messenger). Signing in there fails with
+  // an unhelpful "cancelled" message, so say what to do instead.
+  if (hasPlatformAuthenticator === false) {
+    return (
+      <div className="text-xs text-amber-400 max-w-[16rem] text-right leading-snug">
+        This browser can't use fingerprint or Face unlock. Open the app in
+        Chrome or Safari to sign in.
       </div>
     );
   }
