@@ -148,18 +148,6 @@ export function MemberSelector() {
     );
   }
 
-  // The API can exist with no usable biometric behind it — typically an
-  // in-app browser (Zalo, Facebook, Messenger). Signing in there fails with
-  // an unhelpful "cancelled" message, so say what to do instead.
-  if (hasPlatformAuthenticator === false) {
-    return (
-      <div className="text-xs text-amber-400 max-w-[16rem] text-right leading-snug">
-        This browser can't use fingerprint or Face unlock. Open the app in
-        Chrome or Safari to sign in.
-      </div>
-    );
-  }
-
   // Show loading state
   if (authLoading) {
     return <div className="text-sm text-gray-400">Loading...</div>;
@@ -239,9 +227,32 @@ export function MemberSelector() {
           <div className="text-center">
             <div className="text-4xl mb-4">👤</div>
             <h2 className="text-xl font-semibold text-gray-100 mb-2">Create Account</h2>
-            <p className="text-gray-400 mb-6">
+            <p className="text-gray-400 mb-4">
               Enter your name to create an account with passkey authentication.
             </p>
+            {/* Android keeps passkeys in Google Password Manager, so the phone
+                asks for a Google account mid-flow. Saying so up front stops it
+                reading like the app is demanding a Google sign-in. */}
+            {hasPlatformAuthenticator === false ? (
+              // No biometric here: could be a device with no screen lock, or
+              // an in-app browser (Zalo, Messenger) that hides it. Enrolment
+              // still works by scanning a QR with a phone that has one, so
+              // guide rather than block.
+              <p className="text-xs text-amber-400 mb-6">
+                This device has no fingerprint or face unlock available. You'll
+                be offered a QR code — scan it with a phone that has one, and
+                the passkey is stored there. If you expected biometrics here,
+                set a screen lock, or open this page in Chrome or Safari rather
+                than inside a chat app.
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500 mb-6">
+                Your phone will ask for a fingerprint or face scan. Android
+                stores passkeys in Google Password Manager, so it may ask you to
+                pick a Google account first — that's what keeps the passkey
+                backed up if you lose the phone.
+              </p>
+            )}
 
             <div className="mb-6">
               <input

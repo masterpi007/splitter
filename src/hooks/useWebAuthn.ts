@@ -66,7 +66,13 @@ export function useWebAuthn(): UseWebAuthnReturn {
 
     try {
       // Get registration options from server
-      const options = await authApi.getRegistrationOptions(memberId, memberName);
+      // hasPlatformAuthenticator === false means no fingerprint/face on this
+      // device; ask the server for an enrolment that can use another device.
+      const options = await authApi.getRegistrationOptions(
+        memberId,
+        memberName,
+        hasPlatformAuthenticator === false,
+      );
 
       // Start WebAuthn registration (shows biometric prompt)
       const credential = await startRegistration({ optionsJSON: options });
@@ -108,7 +114,7 @@ export function useWebAuthn(): UseWebAuthnReturn {
 
       return session;
     } catch (err) {
-      const message = getErrorMessage(err);
+      const message = getErrorMessage(err, 'signin');
       setError(message);
       throw err;
     } finally {
@@ -200,14 +206,18 @@ export function useWebAuthn(): UseWebAuthnReturn {
 }
 
 // Helper to extract user-friendly error messages
-function getErrorMessage(err: unknown): string {
+type AuthContext = 'signin' | 'enroll';
+
+function getErrorMessage(err: unknown, ctx: AuthContext = 'enroll'): string {
   if (err instanceof Error) {
     // Handle WebAuthn-specific errors
     if (err.name === 'NotAllowedError') {
       // The spec collapses "user dismissed", "timed out" and "no credential
-      // matched" into one error, so name the likeliest causes rather than
-      // blaming the user for a cancel they did not make.
-      return 'No passkey was used. Either the prompt was dismissed, or this device has no passkey for this site yet — ask an admin for a recovery link, or open the app in Chrome or Safari rather than an in-app browser.';
+      // matched" into one error. Which of those is likely depends entirely on
+      // whether we were signing in or enrolling, so split the advice.
+      return ctx === 'signin'
+        ? 'No passkey found on this device for this site. If you set one up on another device, ask an admin for a recovery link.'
+        : 'Passkey setup was cancelled or timed out. Please try again.';
     }
     if (err.name === 'InvalidStateError') {
       return 'This passkey is already registered.';

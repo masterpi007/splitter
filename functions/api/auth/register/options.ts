@@ -6,7 +6,8 @@ import { getRp } from '../../utils/rp';
 
 export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
   try {
-    const { memberId, memberName } = await context.request.json() as RegisterOptionsRequest;
+    const { memberId, memberName, crossDevice } =
+      await context.request.json() as RegisterOptionsRequest & { crossDevice?: boolean };
 
     if (!memberId || !memberName) {
       return Response.json(
@@ -33,15 +34,21 @@ export const onRequestPost: PagesFunction<AuthEnv> = async (context) => {
         transports: cred.transports,
       })),
       authenticatorSelection: {
-        // Ask for the phone's own biometrics. Without this the browser
-        // offers the full transport picker (security key / NFC / another
-        // device) and on several Android builds the fingerprint option is
-        // not surfaced at all. Cross-device enrolment still exists — it goes
-        // through the passkey invite link, not this picker.
-        authenticatorAttachment: 'platform',
+        // Default to the device's own biometrics: without an attachment the
+        // browser shows the whole transport picker and some Android builds
+        // never surface the fingerprint at all.
+        //
+        // But 'platform' is a hard filter, and a device with no screen lock,
+        // no Google account or no biometric hardware then has no way in. When
+        // the client reports it found no platform authenticator we drop the
+        // filter so the QR / another-device route reappears.
+        ...(crossDevice
+          ? { authenticatorAttachment: 'cross-platform' as const }
+          : { authenticatorAttachment: 'platform' as const }),
         residentKey: 'required', // Required for discoverable credentials
         userVerification: 'preferred',
       },
+      hints: crossDevice ? ['hybrid'] : ['client-device'],
     });
 
     // Store challenge for verification

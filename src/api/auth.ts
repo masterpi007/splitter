@@ -49,12 +49,15 @@ export async function checkHasPasskeys(userIdOrMemberId: string): Promise<boolea
 export async function getRegistrationOptions(
   memberId: string,
   memberName: string,
+  // Set when this device has no usable biometric, so the server drops the
+  // platform-only filter and the QR / another-device route stays available.
+  crossDevice = false,
 ): Promise<PublicKeyCredentialCreationOptionsJSON> {
   const result = await fetchAuthApi<{ options: PublicKeyCredentialCreationOptionsJSON }>(
     '/register/options',
     {
       method: 'POST',
-      body: JSON.stringify({ memberId, memberName }),
+      body: JSON.stringify({ memberId, memberName, crossDevice }),
     }
   );
   return result.options;
