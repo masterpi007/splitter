@@ -632,7 +632,6 @@ export function ExpenseCard({
               </div>
               <div className="space-y-1">
                 {expense.splits.map((split) => {
-                  const isPayer = split.memberId === expense.paidBy;
                   const memberItems = expense.items?.filter(item => item.memberId === split.memberId) || [];
                   // Payer's row shows the amount they actually carry,
                   // unclaimed items included.
