@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { formatCurrency, formatRelativeTime, getTagColor, isDeleted } from '../utils/balances';
+import { formatCurrency, formatRelativeTime, getTagColor, isDeleted, distributeByShares } from '../utils/balances';
 import { SignOffButton } from '../components/SignOffButton';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { memberAvatarUrl } from '../components/MemberSelect';
@@ -58,17 +58,19 @@ export function ExpenseView() {
   // Removed members may still appear in old splits — include them for lookups.
   const allGroupMembers = [...group.members, ...(group.removedMembers ?? [])];
   const activeMembers = group.members.filter((m) => !m.removedAt);
-  const totalShares = activeMembers.reduce((s, m) => s + (m.share ?? 1), 0);
 
+  // Group mode derives amounts on read; use the same largest-remainder
+  // allocation as everywhere else so the rows sum exactly to the total
+  // (independent per-row rounding could drift by ±0.01).
+  const groupDistribution = isGroupMode
+    ? distributeByShares(expense.amount, activeMembers.map((m) => [m.id, m.share ?? 1]), 2)
+    : null;
   const splitRows: { memberId: string; amount: number; signed: boolean }[] = isGroupMode
-    ? activeMembers.map((m) => {
-        const myShare = m.share ?? 1;
-        const amount = totalShares > 0
-          ? Math.round((expense.amount * myShare / totalShares) * 100) / 100
-          : 0;
-        const signed = (expense.signedOffBy ?? []).some((e) => e.memberId === m.id);
-        return { memberId: m.id, amount, signed };
-      })
+    ? activeMembers.map((m) => ({
+        memberId: m.id,
+        amount: groupDistribution?.get(m.id) ?? 0,
+        signed: (expense.signedOffBy ?? []).some((e) => e.memberId === m.id),
+      }))
     : expense.splits.map((s) => ({ memberId: s.memberId, amount: s.amount, signed: s.signedOff }));
 
   const splitTypeLabel: Record<string, string> = {

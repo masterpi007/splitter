@@ -86,14 +86,8 @@ export function ExpenseCard({
   const isSettlement = expense.splitType === 'settlement';
   const expenseDeleted = isDeleted(expense);
 
-  // Check if expense has unassigned items (incomplete)
-  const hasUnassignedItems = expense.items?.some((item) => !item.memberId) ?? false;
-
-  // Items stats for display
-  const unclaimedCount = expense.items?.filter((item) => !item.memberId).length ?? 0;
-  const unclaimedAmount = expense.items
-    ?.filter((item) => !item.memberId)
-    .reduce((sum, item) => sum + item.amount, 0) ?? 0;
+  // Unassigned items belong to the payer: new saves persist that assignment,
+  // and legacy rows with no memberId are folded into the payer's list below.
 
   // For settlements, get the recipient (the person in splits)
   const recipient = isSettlement ? members.find((m) => m.id === expense.splits[0]?.memberId) : null;
@@ -491,8 +485,6 @@ export function ExpenseCard({
               className={`text-xs px-2 py-0.5 rounded-full ${
                 expenseDeleted
                   ? 'bg-red-900 text-red-300'
-                  : hasUnassignedItems
-                  ? 'bg-orange-900 text-orange-300'
                   : allSigned
                   ? isSettlement
                     ? 'bg-cyan-900 text-cyan-300'
@@ -500,7 +492,7 @@ export function ExpenseCard({
                   : 'bg-yellow-900 text-yellow-300'
               }`}
             >
-              {expenseDeleted ? 'Deleted' : hasUnassignedItems ? 'Unclaimed items' : allSigned ? 'Accepted' : 'Pending'}
+              {expenseDeleted ? 'Deleted' : allSigned ? 'Accepted' : 'Pending'}
             </span>
           </div>
         </div>
@@ -536,10 +528,6 @@ export function ExpenseCard({
               }}
             >
               {(() => {
-                // Unclaimed items ride with the payer until someone claims
-                // them, so the payer's number includes them — the UI shows
-                // the same amount the split math actually charges.
-                const isUserPayer = currentUser && currentUser.id === expense.paidBy;
                 const userDisplayAmount = userSplit.amount;
 
                 return (
@@ -554,13 +542,10 @@ export function ExpenseCard({
                       {userSplit.signedOff && (
                         <span className="text-xs text-green-400 font-medium">Accepted</span>
                       )}
-                      {isUserPayer && unclaimedAmount > 0 && (
-                        <span className="text-xs text-gray-500">· incl. {formatCurrency(unclaimedAmount, currency)} unclaimed</span>
-                      )}
                     </span>
                     <span className="flex items-center gap-1 text-gray-400">
                       {formatCurrency(userDisplayAmount, currency)}
-                      {(expense.splits.length > 1 || unclaimedAmount > 0) && (
+                      {expense.splits.length > 1 && (
                         <svg className="w-4 h-4 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
@@ -632,9 +617,11 @@ export function ExpenseCard({
               </div>
               <div className="space-y-1">
                 {expense.splits.map((split) => {
-                  const memberItems = expense.items?.filter(item => item.memberId === split.memberId) || [];
-                  // Payer's row shows the amount they actually carry,
-                  // unclaimed items included.
+                  // Legacy items saved with no memberId belong to the payer.
+                  const memberItems = expense.items?.filter(
+                    (item) => item.memberId === split.memberId ||
+                      (!item.memberId && split.memberId === expense.paidBy),
+                  ) || [];
                   const displayAmount = split.amount;
                   const isMe = currentUser && split.memberId === currentUser.id;
                   const hasMultipleItems = memberItems.length > 1;
@@ -717,95 +704,10 @@ export function ExpenseCard({
                     </div>
                   );
                 })}
-                {/* Unclaimed items */}
-                {unclaimedCount > 0 && (
-                  <div>
-                    {unclaimedCount === 1 ? (
-                      /* Single unclaimed: compact */
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="w-2 h-2 rounded-full bg-orange-500 flex-shrink-0" />
-                        <span className="text-orange-400 flex-shrink-0">With {getMemberName(expense.paidBy)} · unclaimed</span>
-                        {expense.items?.find(i => !i.memberId)?.description && <span className="text-gray-500 truncate">{expense.items?.find(i => !i.memberId)?.description}</span>}
-                        <span className="text-orange-400">({formatCurrency(unclaimedAmount, currency)})</span>
-                        {currentUser && (
-                          <button
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              const item = expense.items?.find(i => !i.memberId);
-                              if (item) {
-                                setClaimingItemId(item.id);
-                                await claimExpenseItem(expense.id, item.id, true);
-                                setClaimingItemId(null);
-                              }
-                            }}
-                            disabled={!!claimingItemId}
-                            className="text-xs px-1.5 py-0.5 rounded bg-cyan-700 text-cyan-100 hover:bg-cyan-600 disabled:opacity-50 flex-shrink-0"
-                          >
-                            Claim
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      /* Multiple unclaimed: header + nested */
-                      <>
-                        <div className="flex items-center gap-2 text-sm">
-                          <span className="w-2 h-2 rounded-full bg-orange-500 flex-shrink-0" />
-                          <span className="text-orange-400">With {getMemberName(expense.paidBy)} · unclaimed</span>
-                          <span className="text-orange-300">{formatCurrency(unclaimedAmount, currency)}</span>
-                        </div>
-                        <div className="ml-4 mt-1 space-y-1">
-                          {expense.items?.filter(item => !item.memberId).map((item) => {
-                            const isClaiming = claimingItemId === item.id;
-                            return (
-                              <div
-                                key={item.id}
-                                className="flex items-center gap-2 text-xs text-gray-400"
-                              >
-                                <span className="truncate">{item.description}</span>
-                                <span>({formatCurrency(item.amount, currency)})</span>
-                                {currentUser && (
-                                  <button
-                                    onClick={async (e) => {
-                                      e.stopPropagation();
-                                      setClaimingItemId(item.id);
-                                      await claimExpenseItem(expense.id, item.id, true);
-                                      setClaimingItemId(null);
-                                    }}
-                                    disabled={isClaiming}
-                                    className="text-xs px-1.5 py-0.5 rounded bg-cyan-700 text-cyan-100 hover:bg-cyan-600 disabled:opacity-50"
-                                  >
-                                    {isClaiming ? '...' : 'Claim'}
-                                  </button>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
               </div>
             </div>
           )}
 
-          {/* Collapsed items indicator - only when not expanded and has unclaimed */}
-          {!expanded && unclaimedCount > 0 && (
-            <div className="mt-2 pt-2 border-t border-gray-700">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setExpanded(true);
-                }}
-                className="text-xs text-orange-400 hover:text-orange-300 flex items-center gap-1"
-              >
-                {unclaimedCount} unclaimed item{unclaimedCount !== 1 ? 's' : ''}
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-            </div>
-          )}
         </div>
       )}
 

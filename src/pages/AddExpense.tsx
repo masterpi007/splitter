@@ -75,6 +75,9 @@ export function AddExpense() {
   const hasItems = items.length > 0;
 
   const totalShares = Object.values(memberShares).reduce((sum, s) => sum + s, 0);
+  // Preview rows show the same largest-remainder allocation that gets saved,
+  // so the visible amounts always sum exactly to the total.
+  const sharePreview = distributeByShares(totalAmount, Object.entries(memberShares) as [string, number][], 2);
   // Reference share values for the −/+ smart-jump in shares mode: the unique
   // configured shares across the group's active members, ascending.
   const configuredShareValues = useMemo(() => {
@@ -455,7 +458,10 @@ export function AddExpense() {
         await createExpense({
           description: description.trim(), amount: totalAmount, paidBy,
           createdBy: currentUser.id, splitType: 'exact', splits,
-          items, discount,
+          // Items nobody picked belong to the payer — assigned in the data,
+          // not just implied, so edits and other clients see the owner.
+          items: items.map((i) => ({ ...i, memberId: i.memberId ?? paidBy })),
+          discount,
           discountType: discount ? discountType : undefined,
           tags: tags.length > 0 ? tags : undefined, receiptDate,
         });
@@ -939,7 +945,7 @@ export function AddExpense() {
                 if (!member) return null;
                 const isYou = currentUser && memberId === currentUser.id;
                 const percentage = totalShares > 0 ? roundNumber((share / totalShares) * 100) : 0;
-                const memberAmount = totalShares > 0 ? roundNumber(totalAmount * share / totalShares, 2) : 0;
+                const memberAmount = sharePreview.get(memberId) ?? 0;
 
                 return (
                   <div key={memberId} className="flex items-center justify-between bg-gray-800 border border-gray-700 rounded-lg px-3 py-2">

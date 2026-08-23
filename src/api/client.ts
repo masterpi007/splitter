@@ -371,7 +371,9 @@ export async function claimExpenseItem(
     if (item.id === itemId) {
       return {
         ...item,
-        memberId: claim ? memberId : undefined,
+        // Releasing an item returns it to the payer (who fronted the money),
+        // never to an unowned state.
+        memberId: claim ? memberId : expense.paidBy,
       };
     }
     return item;
