@@ -1,4 +1,30 @@
-import { Expense, ExpenseSplit, Member, MemberBalance, Settlement, DiscountType } from '../types';
+import { Expense, ExpenseSplit, Member, MemberBalance, Settlement, DiscountType, ReceiptItem } from '../types';
+
+// In items mode the payer's item is the balancer: whenever a non-payer item
+// changes while the bill total is fixed, the payer's item absorbs the
+// difference so items always sum exactly to the (pre-discount) bill amount —
+// the UI never shows a payer stuck at 0 while the split math charges them
+// the remainder. Returns null when the other items already exceed the target
+// (the caller should let the total grow instead).
+export function absorbIntoPayerItem(
+  items: ReceiptItem[],
+  paidBy: string,
+  targetBillGoc: number,
+): ReceiptItem[] | null {
+  if (!paidBy || targetBillGoc <= 0) return null;
+  const payerIdx = items.findIndex((i) => i.memberId === paidBy);
+  const othersSum = items.reduce((s, i, idx) => (idx === payerIdx ? s : s + i.amount), 0);
+  const payerAmount = roundNumber(targetBillGoc - othersSum, 2);
+  if (payerAmount < 0) return null;
+  if (payerIdx === -1) {
+    if (payerAmount === 0) return items;
+    return [
+      ...items,
+      { id: crypto.randomUUID(), description: '', amount: payerAmount, memberId: paidBy },
+    ];
+  }
+  return items.map((i, idx) => (idx === payerIdx ? { ...i, amount: payerAmount } : i));
+}
 
 // Check if an expense is soft-deleted
 export function isDeleted(expense: Expense): boolean {

@@ -5,7 +5,7 @@ import { ReceiptCapture } from '../components/ReceiptCapture';
 import { ReceiptItems } from '../components/ReceiptItems';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ReceiptItem, ReceiptOCRResult, DiscountType } from '../types';
-import { roundNumber, getTagColor, calculateDiscountAmount, calculateBillGoc, distributeByShares, toLocalDatetimeInput, parseDatetimeLocal, parseDecimal } from '../utils/balances';
+import { roundNumber, getTagColor, calculateDiscountAmount, calculateBillGoc, distributeByShares, absorbIntoPayerItem, toLocalDatetimeInput, parseDatetimeLocal, parseDecimal } from '../utils/balances';
 import { YouBadge } from '../components/YouBadge';
 import { ShareControl } from '../components/ShareControl';
 import { AmountInput } from '../components/AmountInput';
@@ -115,17 +115,40 @@ export function AddExpense() {
   const includedMemberIds = selectedMemberIds;
 
   const handleItemsChange = (newItems: ReceiptItem[]) => {
-    setItems(newItems);
     if (newItems.length === 0) {
+      setItems(newItems);
       setDiscount(undefined);
       setHasManualTotal(false);
-    } else if (!hasManualTotal) {
-      const newBillGoc = newItems.reduce((sum, i) => sum + i.amount, 0);
-      const newDiscountAmount = discountType === 'flat'
-        ? (discount ?? 0)
-        : newBillGoc * ((discount ?? 0) / 100);
-      setTotalAmount(Math.max(0, roundNumber(newBillGoc - newDiscountAmount, 2)));
+      return;
     }
+    if (hasManualTotal) {
+      // A fixed total means the payer's item absorbs whatever the other
+      // items don't cover — unless the payer's own row was just edited or
+      // removed (that's an explicit choice, so the total follows the items).
+      const changed = newItems.find((n) => {
+        const o = items.find((i) => i.id === n.id);
+        return !o || o.amount !== n.amount;
+      });
+      const removedPayerItem = items.some(
+        (o) => o.memberId === paidBy && !newItems.some((n) => n.id === o.id),
+      );
+      const payerEdited = removedPayerItem || changed?.memberId === paidBy;
+      if (!payerEdited) {
+        const target = calculateBillGoc(totalAmount, discount, discountType);
+        const balanced = absorbIntoPayerItem(newItems, paidBy, target);
+        if (balanced) {
+          setItems(balanced);
+          return;
+        }
+        // Other items exceed the fixed total — let the total grow below.
+      }
+    }
+    setItems(newItems);
+    const newBillGoc = newItems.reduce((sum, i) => sum + i.amount, 0);
+    const newDiscountAmount = discountType === 'flat'
+      ? (discount ?? 0)
+      : newBillGoc * ((discount ?? 0) / 100);
+    setTotalAmount(Math.max(0, roundNumber(newBillGoc - newDiscountAmount, 2)));
   };
 
   // The Total field holds the amount actually paid = subtotal − discount, so
@@ -151,18 +174,14 @@ export function AddExpense() {
       const diff = roundNumber(newBillGoc - currentBillGoc, 2);
 
       if (Math.abs(diff) > 0.001) {
-        const payerItems = items.filter(i => i.memberId === paidBy);
-        if (payerItems.length > 0) {
-          const firstPayerItem = payerItems[0];
-          const newItemAmount = roundNumber(firstPayerItem.amount + diff, 2);
-          if (newItemAmount < 0) {
-            setError('Adjustment would make item amount negative');
-            return;
-          }
-          setItems(items.map(item =>
-            item.id === firstPayerItem.id ? { ...item, amount: newItemAmount } : item
-          ));
+        // Payer item absorbs the change (created if missing) so items keep
+        // summing exactly to the bill.
+        const balanced = absorbIntoPayerItem(items, paidBy, newBillGoc);
+        if (!balanced) {
+          setError('Other items already exceed this total');
+          return;
         }
+        setItems(balanced);
       }
       setTotalAmount(parsed);
     } else if (value === '' || value === '0') {

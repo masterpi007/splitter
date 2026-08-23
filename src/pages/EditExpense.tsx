@@ -4,11 +4,11 @@ import { useApp } from '../context/AppContext';
 import { ReceiptItems } from '../components/ReceiptItems';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ReceiptItem, DiscountType } from '../types';
-import { roundNumber, calculateDiscountAmount, calculateBillGoc, distributeByShares, toLocalDatetimeInput, parseDatetimeLocal, parseDecimal } from '../utils/balances';
+import { roundNumber, calculateDiscountAmount, calculateBillGoc, distributeByShares, absorbIntoPayerItem, toLocalDatetimeInput, parseDatetimeLocal, parseDecimal } from '../utils/balances';
 import { YouBadge } from '../components/YouBadge';
 import { ShareControl } from '../components/ShareControl';
 import { AmountInput } from '../components/AmountInput';
-import { MemberSelect } from '../components/MemberSelect';
+import { MemberSelect, memberAvatarUrl } from '../components/MemberSelect';
 
 export function EditExpense() {
   const navigate = useNavigate();
@@ -181,6 +181,28 @@ export function EditExpense() {
   };
 
   const handleItemsChange = (newItems: ReceiptItem[]) => {
+    if (newItems.length > 0 && totalAmount > 0) {
+      // The stored total is authoritative: non-payer item changes are
+      // absorbed by the payer's item so items keep summing to the bill.
+      // Editing or removing the payer's own row is an explicit choice —
+      // then the total follows the items instead.
+      const changed = newItems.find((n) => {
+        const o = items.find((i) => i.id === n.id);
+        return !o || o.amount !== n.amount;
+      });
+      const removedPayerItem = items.some(
+        (o) => o.memberId === paidBy && !newItems.some((n) => n.id === o.id),
+      );
+      const payerEdited = removedPayerItem || changed?.memberId === paidBy;
+      if (!payerEdited) {
+        const target = calculateBillGoc(totalAmount, discount, discountType);
+        const balanced = absorbIntoPayerItem(newItems, paidBy, target);
+        if (balanced) {
+          setItems(balanced);
+          return;
+        }
+      }
+    }
     const newBillGoc = newItems.reduce((sum, i) => sum + i.amount, 0);
     const newDiscountAmount = discountType === 'flat'
       ? (discount ?? 0)
@@ -214,26 +236,14 @@ export function EditExpense() {
       const diff = roundNumber(newBillGoc - currentBillGoc, 2);
 
       if (Math.abs(diff) > 0.001) {
-        const payerItems = items.filter(i => i.memberId === paidBy);
-        if (payerItems.length > 0) {
-          const firstPayerItem = payerItems[0];
-          const newItemAmount = roundNumber(firstPayerItem.amount + diff, 2);
-          if (newItemAmount < 0) {
-            setError('Adjustment would make item amount negative');
-            return;
-          }
-          setItems(items.map(item =>
-            item.id === firstPayerItem.id ? { ...item, amount: newItemAmount } : item
-          ));
-        } else if (items.length === 0 || paidBy) {
-          const newItem: ReceiptItem = {
-            id: crypto.randomUUID(),
-            description: '',
-            amount: newBillGoc,
-            memberId: paidBy || undefined,
-          };
-          setItems(newItem.amount > 0 ? [...items, newItem] : items);
+        // Payer item absorbs the change (created if missing) so items keep
+        // summing exactly to the bill.
+        const balanced = absorbIntoPayerItem(items, paidBy, newBillGoc);
+        if (!balanced) {
+          setError('Other items already exceed this total');
+          return;
         }
+        setItems(balanced);
       }
       setTotalAmount(parsed);
     } else if (value === '' || value === '0') {
@@ -702,13 +712,18 @@ export function EditExpense() {
                     draggable={splitMode === 'items'}
                     onClick={() => handleMemberTap(member.id)}
                     onDragStart={(e) => handleMemberDragStart(e, member.id)}
-                    className={`px-3 py-1.5 rounded-full text-sm cursor-grab active:cursor-grabbing select-none transition-colors ${
-                      isIncluded
-                        ? 'bg-cyan-600 text-white hover:bg-red-500'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
+                    className="flex flex-col items-center gap-1 w-14 cursor-grab active:cursor-grabbing select-none"
                   >
-                    {member.name}{isYou && <> <YouBadge /></>}
+                    <img
+                      src={memberAvatarUrl(member)}
+                      alt=""
+                      className={`w-11 h-11 rounded-full bg-gray-700 transition-all ${
+                        isIncluded ? 'ring-2 ring-cyan-500' : 'opacity-40 grayscale'
+                      }`}
+                    />
+                    <span className={`text-xs truncate max-w-full ${isYou ? 'text-amber-400 font-medium' : isIncluded ? 'text-gray-200' : 'text-gray-500'}`}>
+                      {isYou ? 'You' : member.name}
+                    </span>
                   </div>
                 );
               })}

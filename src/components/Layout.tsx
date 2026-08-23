@@ -27,14 +27,20 @@ export function Layout({ children }: LayoutProps) {
     }
   }, [authenticated, authLoading, loading, groupsLoading, groups.length, location.pathname, navigate]);
 
-  // The back button is a hardcoded "return to groups list" affordance —
-  // simpler than history-based nav, which gets confusing when users land
-  // deep via an invite link. Disabled on /groups itself (already there).
   const onGroupsScreen = location.pathname === '/groups';
   const headerTitle = onGroupsScreen ? 'Groups' : (group?.name ?? 'Chia');
 
   const handleBack = () => {
-    navigate('/groups');
+    // Go to the previous in-app page. React Router stamps a history index on
+    // each entry; idx 0 means this is the first page of the session (deep
+    // link / fresh open), where browser-back would leave the app — fall back
+    // to the groups list there.
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) {
+      navigate(-1);
+    } else {
+      navigate('/groups');
+    }
   };
 
   const handleReload = async () => {
@@ -99,7 +105,7 @@ export function Layout({ children }: LayoutProps) {
                 onClick={handleBack}
                 disabled={onGroupsScreen}
                 className="cursor-pointer p-2.5 text-gray-400 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
-                aria-label="Back to groups"
+                aria-label="Back"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
