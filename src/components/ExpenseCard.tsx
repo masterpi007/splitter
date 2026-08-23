@@ -500,7 +500,7 @@ export function ExpenseCard({
                   : 'bg-yellow-900 text-yellow-300'
               }`}
             >
-              {expenseDeleted ? 'Deleted' : hasUnassignedItems ? 'Incomplete' : allSigned ? 'Accepted' : 'Pending'}
+              {expenseDeleted ? 'Deleted' : hasUnassignedItems ? 'Unclaimed items' : allSigned ? 'Accepted' : 'Pending'}
             </span>
           </div>
         </div>
@@ -536,11 +536,11 @@ export function ExpenseCard({
               }}
             >
               {(() => {
-                // For payer, show only their assigned items amount (exclude unclaimed)
+                // Unclaimed items ride with the payer until someone claims
+                // them, so the payer's number includes them — the UI shows
+                // the same amount the split math actually charges.
                 const isUserPayer = currentUser && currentUser.id === expense.paidBy;
-                const userDisplayAmount = isUserPayer && unclaimedAmount > 0
-                  ? userSplit.amount - unclaimedAmount
-                  : userSplit.amount;
+                const userDisplayAmount = userSplit.amount;
 
                 return (
                   <div className="flex justify-between items-center text-sm">
@@ -554,8 +554,8 @@ export function ExpenseCard({
                       {userSplit.signedOff && (
                         <span className="text-xs text-green-400 font-medium">Accepted</span>
                       )}
-                      {(expense.splits.length > 1 || unclaimedAmount > 0) && unclaimedAmount > 0 && (
-                        <span className="text-xs text-gray-500">· {formatCurrency(unclaimedAmount, currency)} unclaimed</span>
+                      {isUserPayer && unclaimedAmount > 0 && (
+                        <span className="text-xs text-gray-500">· incl. {formatCurrency(unclaimedAmount, currency)} unclaimed</span>
                       )}
                     </span>
                     <span className="flex items-center gap-1 text-gray-400">
@@ -634,9 +634,9 @@ export function ExpenseCard({
                 {expense.splits.map((split) => {
                   const isPayer = split.memberId === expense.paidBy;
                   const memberItems = expense.items?.filter(item => item.memberId === split.memberId) || [];
-                  const displayAmount = isPayer && unclaimedAmount > 0
-                    ? split.amount - unclaimedAmount
-                    : split.amount;
+                  // Payer's row shows the amount they actually carry,
+                  // unclaimed items included.
+                  const displayAmount = split.amount;
                   const isMe = currentUser && split.memberId === currentUser.id;
                   const hasMultipleItems = memberItems.length > 1;
                   const singleItem = memberItems.length === 1 ? memberItems[0] : null;
@@ -725,7 +725,7 @@ export function ExpenseCard({
                       /* Single unclaimed: compact */
                       <div className="flex items-center gap-2 text-sm">
                         <span className="w-2 h-2 rounded-full bg-orange-500 flex-shrink-0" />
-                        <span className="text-orange-400 flex-shrink-0">Unclaimed</span>
+                        <span className="text-orange-400 flex-shrink-0">With {getMemberName(expense.paidBy)} · unclaimed</span>
                         {expense.items?.find(i => !i.memberId)?.description && <span className="text-gray-500 truncate">{expense.items?.find(i => !i.memberId)?.description}</span>}
                         <span className="text-orange-400">({formatCurrency(unclaimedAmount, currency)})</span>
                         {currentUser && (
@@ -751,7 +751,7 @@ export function ExpenseCard({
                       <>
                         <div className="flex items-center gap-2 text-sm">
                           <span className="w-2 h-2 rounded-full bg-orange-500 flex-shrink-0" />
-                          <span className="text-orange-400">Unclaimed</span>
+                          <span className="text-orange-400">With {getMemberName(expense.paidBy)} · unclaimed</span>
                           <span className="text-orange-300">{formatCurrency(unclaimedAmount, currency)}</span>
                         </div>
                         <div className="ml-4 mt-1 space-y-1">
